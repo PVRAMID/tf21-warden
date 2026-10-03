@@ -1006,3 +1006,14 @@ body.alert {
 .nav button {
   padding: 9px 14px;
 }
+
+/* The sign-in number. */
+.signin-check {
+  display: grid;
+  gap: 8px;
+}
+.signin-check b {
+  font: 600 46px/1 var(--display);
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}

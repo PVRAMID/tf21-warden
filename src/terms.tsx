@@ -34,7 +34,7 @@ const SENDS = [
   "Your settings in this app: seeding hours and servers, which notifications you muted.",
   "Every 30 seconds, whether this PC could answer a seed call right now and a one-word reason if not, such as “off”, “hours”, “in_game” or “busy”.",
   "Your answer to a seed call (joined, declined, cancelled or failed), and whether you opened or cleared a notification.",
-  "If you sign in: the link between this install and your TF21 profile. Signing in happens in your browser; WARDEN never sees a password.",
+  "If you sign in: the link between this install and your TF21 profile. Signing in happens in your browser, confirmed with a number only this app shows you; WARDEN never sees a password.",
   "Like any website you visit, tf21.net sees your IP address.",
 ];
 const NEVER = [

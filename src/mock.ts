@@ -273,6 +273,8 @@ export async function invoke(command: string, args: Record<string, any> = {}) {
     case "set_autostart":
       state.autostart = args.enabled;
       return null;
+    case "link":
+      return { code: "ABCD2345", check: "481516", url: "" };
     case "set_consent":
       state.consent = { needed: false, seeding: args.seeding };
       return null;

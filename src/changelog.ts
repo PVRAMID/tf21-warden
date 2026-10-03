@@ -10,6 +10,15 @@ export type Release = {
 
 export const CHANGELOG: Release[] = [
   {
+    version: "1.2.2",
+    date: "2026-10-03",
+    author: "PVRAMID",
+    title: "Safer sign-in",
+    changes: [
+      "Signing in now shows a six-digit number in the app that you type on tf21.net. A sign-in link sent to you by somebody else can no longer be used to link their app to your profile.",
+    ],
+  },
+  {
     version: "1.2.1",
     date: "2026-10-03",
     author: "PVRAMID",

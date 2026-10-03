@@ -1,7 +1,7 @@
 # TF21 WARDEN
 
 The source code of **TF21 WARDEN**, the Windows companion app of the
-[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.2.1**.
+[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.2.2**.
 
 > **This repository is public for one reason: so you can see exactly what the app does.**
 > It is here for privacy reassurance and transparency. It is **not** open source and it is
@@ -70,7 +70,7 @@ The app talks to **tf21.net and nothing else**. Every request it can make is in
 | Settings (`PUT /api/app/settings`) | Your seeding hours and servers, muted notifications and the sound switch. |
 | Seed call answers (`POST /api/app/offers/...`) | Joined, declined, cancelled or failed, with a short reason. |
 | Inbox (`/api/app/feed...`) | Which notifications you opened or cleared. |
-| Sign-in (`POST /api/app/link`) | A request for a one-time code. Signing in happens in your browser; the app never sees a password. |
+| Sign-in (`POST /api/app/link`) | A request for a one-time code and a six-digit number. Signing in happens in your browser, where you type the number the app shows; the app never sees a password. |
 | Reading (`GET`) | Public server status, news, competitions and leaderboards, and your own record when signed in. |
 
 ### What it reads on your PC, and what it never does

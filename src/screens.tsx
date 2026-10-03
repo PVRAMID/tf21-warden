@@ -724,6 +724,8 @@ export function Settings({
 }) {
   const { settings, save, error } = useSettings(state);
   const [linking, setLinking] = useState(false);
+  // The number to type on the website's sign-in page.
+  const [check, setCheck] = useState("");
   const [failed, setFailed] = useState("");
   const me = state.me;
   useEffect(() => {
@@ -777,19 +779,32 @@ export function Settings({
                 className="button"
                 onClick={() => {
                   setLinking(true);
-                  invoke("link").catch((e) => {
-                    setLinking(false);
-                    setFailed(String(e));
-                  });
+                  setCheck("");
+                  invoke<{ check: string }>("link")
+                    .then((made) => setCheck(made.check))
+                    .catch((e) => {
+                      setLinking(false);
+                      setFailed(String(e));
+                    });
                 }}
               >
                 Sign in
               </button>
             )}
-            {linking && (
-              <span className="small">Finish signing in in your browser.</span>
-            )}
           </div>
+          {linking && (
+            <div className="impact signin-check">
+              Your browser has opened tf21.net. Type this number there to finish
+              signing in:
+              <b aria-label="Sign-in number">
+                {check ? `${check.slice(0, 3)} ${check.slice(3)}` : "··· ···"}
+              </b>
+              <span className="small">
+                Never give this number to anyone. It is only for the page your
+                own WARDEN just opened.
+              </span>
+            </div>
+          )}
         </Panel>
         <Panel
           title="This PC"
