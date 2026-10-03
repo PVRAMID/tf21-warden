@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TF21 WARDEN",
+  "version": "1.2.1",
+  "identifier": "net.tf21.warden",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1421",
+    "beforeDevCommand": "npm run ui",
+    "beforeBuildCommand": "npm run build:ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TF21 WARDEN",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 980,
+        "minHeight": 640,
+        "center": true,
+        "decorations": false,
+        "visible": false
+      },
+      {
+        "label": "alert",
+        "title": "TF21 WARDEN",
+        "url": "alert.html",
+        "width": 440,
+        "height": 236,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https://tf21.net; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Task Force 21",
+    "shortDescription": "TF21 WARDEN Companion App",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQzRDE2OEZCNzJCRDhCODAKUldTQWk3MXkrMmpSUTluYk5KOUpUcngySGZLNnBVZStLdnlRT2xYbi8yeXh2TkpDZGovOVYxTzYK",
+      "endpoints": [
+        "https://tf21.net/app/update/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
+    }
+  }
+}
