@@ -5,25 +5,16 @@ import {
   api,
   invoke,
   REASONS,
+  useRead,
   type DeviceSettings,
   type Notification,
   type State,
 } from "./bridge";
 import type { Tab } from "./main";
+import { ServerCard, useServers } from "./servers";
 import { SeedingAgreement } from "./terms";
 
 type Go = (tab: Tab, slug?: string | null) => void;
-type ServerRow = {
-  slug: string;
-  name: string;
-  status: {
-    state: string;
-    online: boolean;
-    match?: { map: string; players: { current: number; max: number } };
-    facts?: { region?: string };
-    seeding?: { active: boolean };
-  };
-};
 type Post = {
   slug: string;
   title: string;
@@ -61,26 +52,6 @@ const day = (iso: string) =>
 const open = (url: string) => invoke("open_url", { url });
 // The app's source, published so anyone can check what it does.
 const SOURCE = "https://github.com/PVRAMID/tf21-warden";
-
-/** Reads a website path now and again every `ms`; keeps the last good answer. */
-function useRead<T>(path: string | null, ms = 0) {
-  const [data, setData] = useState<T | null>(null);
-  useEffect(() => {
-    if (!path) return;
-    let alive = true;
-    const read = () =>
-      api<T>(path)
-        .then((r) => alive && r && setData(r))
-        .catch(() => {});
-    void read();
-    const timer = ms ? setInterval(read, ms) : undefined;
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [path, ms]);
-  return data;
-}
 
 function Panel({
   numeral,
@@ -146,126 +117,6 @@ function Switch({
   );
 }
 
-function ServerCard({ server, state }: { server: ServerRow; state: State }) {
-  const [error, setError] = useState("");
-  // Set when nobody on the server could be joined through Steam: the ID to join by hand.
-  const [code, setCode] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const match = server.status.match;
-  const players = match?.players;
-  const join = () => {
-    setError("");
-    setCode(null);
-    invoke<{ opened: boolean; code: string | null }>("join_link", {
-      slug: server.slug,
-    })
-      .then((r) => {
-        if (!r.opened) setCode(r.code || "");
-      })
-      .catch((e) => setError(String(e)));
-  };
-  return (
-    <div className="panel server">
-      <span className="eyebrow">
-        <i className={`dot ${server.status.online ? "live" : "hot"}`} />
-        {server.status.online
-          ? server.status.seeding?.active
-            ? "Seeding now"
-            : "Live"
-          : "Offline"}
-      </span>
-      <h2 title={server.name}>{server.name}</h2>
-      <div className="count">
-        <span className={players ? "gold" : ""}>{players?.current ?? "—"}</span>
-        <em>/ {players?.max ?? "—"}</em>
-      </div>
-      <div className="fill" aria-hidden="true">
-        <i
-          style={{
-            width: `${players ? (players.current / players.max) * 100 : 0}%`,
-          }}
-        />
-      </div>
-      <div className="facts">
-        <span>
-          Map <b>{match?.map || "—"}</b>
-        </span>
-        {server.status.facts?.region && (
-          <span>
-            Region <b>{server.status.facts.region}</b>
-          </span>
-        )}
-      </div>
-      {error && <p className="notice">{error}</p>}
-      {code !== null && (
-        <div className="impact">
-          Nobody on the server can be joined through Steam right now. In WARDOGS
-          choose Deploy, Community, Join by ID
-          {code ? " and paste this Server ID:" : "."}
-          {code && (
-            <div className="actions">
-              <b className="server-id">{code}</b>
-              <button
-                type="button"
-                className="text"
-                onClick={() =>
-                  navigator.clipboard.writeText(code).then(() => {
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
-                  })
-                }
-              >
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-      <div className="actions">
-        <button
-          type="button"
-          className="button"
-          disabled={!server.status.online || !state.game_installed}
-          onClick={join}
-        >
-          <Play size={13} /> Join
-        </button>
-        <button
-          type="button"
-          className="text"
-          onClick={() => open(`/join/${server.slug}`)}
-        >
-          Join page <ExternalLink size={11} />
-        </button>
-      </div>
-      {!state.game_installed && (
-        <p className="small">WARDOGS is not installed on this PC.</p>
-      )}
-    </div>
-  );
-}
-
-export function Servers({ state }: { state: State }) {
-  const data = useRead<{ servers: ServerRow[] }>("/api/servers", 15000);
-  return (
-    <section>
-      <span className="eyebrow">The servers</span>
-      <h1>
-        PICK A <em>FIGHT.</em>
-      </h1>
-      <p className="lead">
-        Join hands Steam a link to somebody already on the server, and Steam
-        takes you in. WARDEN does not touch your mouse or keyboard for it.
-      </p>
-      <div className="servers">
-        {data?.servers.map((s) => (
-          <ServerCard key={s.slug} server={s} state={state} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
 export function Home({
   state,
   inbox,
@@ -275,13 +126,11 @@ export function Home({
   inbox: Notification[];
   go: Go;
 }) {
-  const servers = useRead<{ servers: ServerRow[] }>("/api/servers", 15000);
+  const { servers, at } = useServers(15000);
   const news = useRead<{ items: Post[] }>("/api/blog?per_page=3");
   const online =
-    servers?.servers.reduce(
-      (n, s) => n + (s.status.match?.players.current || 0),
-      0,
-    ) ?? null;
+    servers?.reduce((n, s) => n + (s.status.match?.players.current || 0), 0) ??
+    null;
   const hour = new Date().getHours();
   const greeting =
     hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -305,13 +154,15 @@ export function Home({
           </span>
         </div>
         <div className="mast-live">
-          <b className="gold">{online ?? "—"}</b>
+          <b key={online} className="gold flip">
+            {online ?? "—"}
+          </b>
           <span className="label">Players on our servers</span>
         </div>
       </div>
       <div className="servers">
-        {servers?.servers.map((s) => (
-          <ServerCard key={s.slug} server={s} state={state} />
+        {servers?.map((s) => (
+          <ServerCard key={s.slug} server={s} state={state} at={at} />
         ))}
       </div>
       <div className="cols">

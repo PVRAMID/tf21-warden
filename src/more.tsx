@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowLeft, Download, ExternalLink } from "lucide-react";
-import { api, invoke, type State } from "./bridge";
+import { invoke, useRead, type State } from "./bridge";
 import { CHANGELOG, type Release } from "./changelog";
 import type { Tab } from "./main";
 
@@ -86,33 +86,19 @@ const day = (iso: string) =>
     year: "numeric",
   });
 
-function useRead<T>(path: string | null, ms = 0) {
-  const [data, setData] = useState<T | null>(null);
-  useEffect(() => {
-    setData(null);
-    if (!path) return;
-    let alive = true;
-    const read = () =>
-      api<T>(path)
-        .then((r) => alive && r && setData(r))
-        .catch(() => {});
-    void read();
-    const timer = ms ? setInterval(read, ms) : undefined;
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [path, ms]);
-  return data;
-}
-
 function Figures({ items }: { items: [string, string][] }) {
   return (
     <dl className="figures">
       {items.map(([label, value]) => (
         <div key={label}>
           <dt>{label}</dt>
-          <dd>{value}</dd>
+          {/* "4 of 212": the figure, then its measure in small print. */}
+          <dd>
+            {value.split(" of ")[0]}
+            {value.includes(" of ") && (
+              <small> of {value.split(" of ")[1]}</small>
+            )}
+          </dd>
         </div>
       ))}
     </dl>

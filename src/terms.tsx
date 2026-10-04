@@ -35,10 +35,11 @@ const SENDS = [
   "Every 30 seconds, whether this PC could answer a seed call right now and a one-word reason if not, such as “off”, “hours”, “in_game” or “busy”.",
   "Your answer to a seed call (joined, declined, cancelled or failed), and whether you opened or cleared a notification.",
   "If you sign in: the link between this install and your TF21 profile. Signing in happens in your browser, confirmed with a number only this app shows you; WARDEN never sees a password.",
+  "If you report a player from the app: the report itself (who, what, where and when, your description and any clip links) and any screenshots you pick to attach. It goes to the TF21 staff team with your callsign, Discord and Steam account, exactly as a report made on tf21.net does. Looking a player up sends what you type in the search box.",
   "Like any website you visit, tf21.net sees your IP address.",
 ];
 const NEVER = [
-  "Read, open or upload your files, documents, photos or downloads.",
+  "Read, open or upload your files, documents, photos or downloads. The one exception is a screenshot you pick yourself to attach to a player report.",
   "Read your browser, your history, your passwords, your messages or your emails.",
   "Record what you type. It has no key logger and does not watch your keyboard or mouse.",
   "Take pictures of your desktop or of any window other than WARDOGS, or use your camera or microphone.",

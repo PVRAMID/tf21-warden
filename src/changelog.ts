@@ -15,6 +15,19 @@ export type Release = {
 
 export const CHANGELOG: Release[] = [
   {
+    version: "1.3.0",
+    date: "2026-10-04",
+    author: "PVRAMID",
+    title: "The match at a glance, and reports from the app",
+    changes: [
+      "The Servers screen now shows each match as it stands: the score by faction, the match clock, the map and mode, and, on servers that publish who is playing, the MVP so far with their kills, deaths and K/D, and the three players behind them. The cards on Home carry the score and the clock too.",
+      "Report a player without leaving WARDEN. The new Report a player screen asks what tf21.net/report asks: what happened, who it was (anyone on a server right now is listed first), your clip links and screenshots, and the details. Your reports and where they stand are listed there, and every server on the Servers screen has a Report a player button that fills the server in for you.",
+      "A finer finish throughout. Screens arrive piece by piece, numbers tick over when they change, buttons, panels and lists answer the pointer, and a live server glows. All of it stands still if Windows is set to reduce motion.",
+      "Tidied the layout: the Home headline no longer crowds the status under it, panels side by side are the same height, and long server names wrap instead of being cut off.",
+      "New in what the app sends, and in its terms: a report you choose to file, and any screenshot you pick to attach to it. Nothing else on your PC is read.",
+    ],
+  },
+  {
     version: "1.2.4",
     date: "2026-10-04",
     author: "PVRAMID",

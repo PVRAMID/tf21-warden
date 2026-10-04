@@ -5,6 +5,7 @@ import {
   Bell,
   Crosshair,
   Download,
+  Flag,
   Home as HomeIcon,
   ListOrdered,
   Minus,
@@ -25,7 +26,9 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "./app.css";
 import mark from "./mark.svg";
 import { api, invoke, listen, useWarden, type Notification } from "./bridge";
-import { Home, Inbox, News, Seeding, Servers, Settings } from "./screens";
+import { Home, Inbox, News, Seeding, Settings } from "./screens";
+import { Servers } from "./servers";
+import { Reports } from "./report";
 import { Consent } from "./terms";
 import { Changelog, Competitions, Leaderboards, Record, Update } from "./more";
 
@@ -37,6 +40,7 @@ const TABS = [
   ["leaderboards", "Leaderboards", ListOrdered],
   ["news", "News", Newspaper],
   ["seeding", "Seeding", Radio],
+  ["report", "Report a player", Flag],
   ["inbox", "Inbox", Bell],
   // Only there while a newer version is out.
   ["update", "Update", Download],
@@ -200,7 +204,8 @@ function App() {
             <Changelog version={state.version} />
           ))}
         {tab === "home" && <Home state={state} inbox={inbox} go={go} />}
-        {tab === "servers" && <Servers state={state} />}
+        {tab === "servers" && <Servers state={state} go={go} />}
+        {tab === "report" && <Reports state={state} go={go} slug={article} />}
         {tab === "news" && (
           <News
             article={article}

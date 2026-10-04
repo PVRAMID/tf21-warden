@@ -1,7 +1,7 @@
 # TF21 WARDEN
 
 The source code of **TF21 WARDEN**, the Windows companion app of the
-[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.2.4**.
+[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.3.0**.
 
 > **This repository is public for one reason: so you can see exactly what the app does.**
 > It is here for privacy reassurance and transparency. It is **not** open source and it is
@@ -12,8 +12,9 @@ The source code of **TF21 WARDEN**, the Windows companion app of the
 
 WARDEN sits in the system tray and:
 
-- shows TF21 announcements, news, live server status, competitions and leaderboards, and a
-  signed-in member's own record;
+- shows TF21 announcements, news, live server status with each match's score, competitions and
+  leaderboards, and a signed-in member's own record;
+- lets a signed-in member report a player to TF21's staff, with clip links and screenshots;
 - delivers desktop notifications from TF21, and keeps an inbox of them;
 - tells you when a new version is out and shows you what it changes; you decide whether to
   install it (only an update marked critical, for security or because old versions can no
@@ -73,6 +74,7 @@ The app talks to **tf21.net and nothing else**. Every request it can make is in
 | Seed call answers (`POST /api/app/offers/...`) | Joined, declined, cancelled or failed, with a short reason. |
 | Inbox (`/api/app/feed...`) | Which notifications you opened or cleared. |
 | Sign-in (`POST /api/app/link`) | A request for a one-time code and a six-digit number. Signing in happens in your browser, where you type the number the app shows; the app never sees a password. |
+| Player reports (`/api/app/reports...`) | Only if you file one from the app: the report you wrote, any clip links, and any screenshots you picked to attach. Looking a player up sends what you typed in the search box. |
 | Reading (`GET`) | Public server status, news, competitions and leaderboards, and your own record when signed in. |
 
 ### What it reads on your PC, and what it never does
@@ -83,15 +85,16 @@ is running), the signed-in Steam ID from the Windows registry, and Windows' yes-
 window only**, reads them on your PC, and discards them at once; they are never saved or sent.
 
 It does not read your files, browser, passwords or messages, record what you type, capture your
-desktop or other windows, use your camera or microphone, or run with administrator rights. You
-can check each of those statements against the code above.
+desktop or other windows, use your camera or microphone, or run with administrator rights. The
+one file it ever reads is a screenshot you pick yourself to attach to a player report (`attach`
+in `src-tauri/src/lib.rs`). You can check each of those statements against the code above.
 
 ## Security: what could go wrong, and what stops it
 
 The installer for this version, as served from <https://tf21.net/warden>, has this SHA-256:
 
 ```
-3f8e162f3a8adf8810d9f446fdf12f3bc11226744bf590afa6a7cf1fb03e35a3
+e614b8b6b2b492a18f92c87d0b54383a5d0071f3b232b36c660ea50ba87450e3
 ```
 
 Check yours in PowerShell with `Get-FileHash .\TF21-WARDEN-Setup.exe`. This page is not hosted

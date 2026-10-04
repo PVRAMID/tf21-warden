@@ -118,9 +118,36 @@ const server = (
   status: {
     state: "running",
     online: true,
-    match: { map: "Zestafona", players: { current, max: 100 } },
+    uptime_ms: 88675853,
+    match: {
+      map: seeding ? "Zestafona" : "Bakurani",
+      experiences: seeding
+        ? ["Zestafona_KOTH_01"]
+        : ["Bakurani_KOTH_01", "KOTH_InfantryOnly"],
+      lighting: "DayEarlyClear",
+      match_seconds: seeding ? 95 : 1282,
+      score_cap: null,
+      players: { current, max: 100 },
+      factions: [
+        { name: "Lonestar", color: "#4cb1ef", score: seeding ? 0 : 12 },
+        { name: "Valkyra", color: "#fa503e", score: seeding ? 1 : 21 },
+        { name: "Manticore", color: "#1dd65c", score: seeding ? 0 : 34 },
+      ],
+    },
+    // The first publishes who is on it; the second keeps its roster to itself.
+    ...(seeding
+      ? {
+          players: [
+            { name: "Kwalepe", faction: "Valkyra", kills: 14, deaths: 3 },
+            { name: "Norris", faction: "Lonestar", kills: 9, deaths: 6 },
+            { name: "x_Reaper_x", faction: "Manticore", kills: 9, deaths: 8 },
+            { name: "Tovarisch", faction: "Valkyra", kills: 4, deaths: 7 },
+            { name: "Bagpuss", faction: "Lonestar", kills: 1, deaths: 5 },
+          ],
+        }
+      : {}),
     facts: { region: "UK / LONDON" },
-    seeding: { active: seeding },
+    seeding: { active: seeding, smart: { target_players: 30 } },
   },
 });
 const post = (n: number, title: string) => ({
@@ -234,6 +261,156 @@ const FIXTURES: Record<string, unknown> = {
       },
     ],
   },
+  "/api/app/reports/config": {
+    enabled: true,
+    intro: "",
+    types: [
+      {
+        id: "cheating",
+        label: "Cheating",
+        short: "Aimbot, wallhack, exploits that give an unfair edge.",
+        questions: [
+          {
+            id: "seen",
+            label: "What did you see?",
+            type: "multiselect",
+            required: true,
+            options: [
+              "Snapping or locked aim",
+              "Tracking players through walls",
+              "No recoil or spread",
+              "Other",
+            ],
+          },
+          {
+            id: "against",
+            label: "Who was on the receiving end?",
+            type: "radio",
+            required: true,
+            options: ["Me", "A teammate", "Watched from spectate or killcam"],
+          },
+          {
+            id: "pattern",
+            label: "How often, and over how many rounds?",
+            type: "textarea",
+            placeholder: "Every engagement across two maps, only when…",
+          },
+        ],
+      },
+      {
+        id: "teamkilling",
+        label: "Teamkilling",
+        short: "Deliberately killing their own side.",
+        questions: [],
+      },
+      {
+        id: "griefing",
+        label: "Griefing",
+        short: "Wasting vehicles, blocking, sabotaging the team.",
+        questions: [],
+      },
+      {
+        id: "comms",
+        label: "Malicious communications",
+        short: "Abuse, harassment, hate speech, threats.",
+        questions: [],
+      },
+      {
+        id: "exploiting",
+        label: "Exploiting",
+        short: "Glitches, out-of-bounds, abusing a bug.",
+        questions: [],
+      },
+      {
+        id: "other",
+        label: "Something else",
+        short: "A rule broken that none of the above covers.",
+        questions: [],
+      },
+    ],
+    servers: [
+      { id: "s1", slug: "uk1", name: "[EU/UK] #1 Task Force 21 - KOTH" },
+      {
+        id: "s2",
+        slug: "uk2",
+        name: "[EU/UK] #2 Task Force 21 - Infantry Only",
+      },
+    ],
+    evidence: {
+      intro:
+        "In order for us to be able to deal with a report against a player, we require evidence. The minimum standard is a clip, or, if it can be clearly shown in a screenshot with context, a screenshot is acceptable.",
+      standards: [
+        "Clips must provide two minutes minimum of footage prior to the incident.",
+        "Clips must have audio.",
+        "Clips must show the substance of the report.",
+      ],
+      noClip:
+        "You can download clipping software for free. We recommend Medal: it is lightweight, and clips are uploaded and shared in the press of a single button.",
+      medalUrl: "https://medal.tv/",
+      fallback:
+        "If you haven't got a clip, or sufficient evidence, we may not be able to deal with your report. We will always log a report against a player so we have the information for future reference.",
+    },
+    limits: {
+      description_min: 40,
+      text_max: 4000,
+      clips: 5,
+      screenshots: 6,
+      window_days: 90,
+    },
+    me: { steam_linked: true },
+  },
+  "/api/app/reports/players": {
+    online: 2,
+    players: [
+      {
+        steam_id: "76561198000000002",
+        name: "x_Reaper_x",
+        names: ["Reaper", "definitely not reaper"],
+        last_seen: new Date().toISOString(),
+        matches: 40,
+        online: { slug: "uk1", name: "[EU/UK] #1 Task Force 21 - KOTH" },
+      },
+      {
+        steam_id: "76561198000000003",
+        name: "Kwalepe",
+        names: [],
+        last_seen: new Date().toISOString(),
+        matches: 212,
+        online: { slug: "uk1", name: "[EU/UK] #1 Task Force 21 - KOTH" },
+      },
+      {
+        steam_id: "76561198000000004",
+        name: "Tovarisch",
+        names: [],
+        last_seen: new Date(Date.now() - 5 * 3600000).toISOString(),
+        matches: 7,
+        online: null,
+      },
+    ],
+  },
+  "/api/app/reports/mine": {
+    reports: [
+      {
+        ref: "R-7K3QXA",
+        type: "cheating",
+        suspect_name: "x_Reaper_x",
+        status: "reviewing",
+        outcome: null,
+        created_at: new Date(Date.now() - 3 * 3600000).toISOString(),
+        unread: true,
+      },
+      {
+        ref: "R-4MNP2C",
+        type: "teamkilling",
+        suspect_name: "Bagpuss",
+        status: "closed",
+        outcome: "actioned",
+        created_at: new Date(Date.now() - 9 * 86400000).toISOString(),
+        unread: false,
+      },
+    ],
+  },
+  "/api/app/reports": { report: { ref: "R-9WX3HB", status: "open" } },
   "/api/servers": {
     servers: [
       server("uk1", "[EU/UK] #1 Task Force 21 - KOTH", 12, true),
@@ -290,6 +467,8 @@ export async function invoke(command: string, args: Record<string, any> = {}) {
         return post(1, "WARDOGS patch 0.11: the server browser update");
       return FIXTURES[path] ?? null;
     }
+    case "attach":
+      return { id: crypto.randomUUID(), name: args.name };
     case "set_paused":
       state.paused = args.paused;
       return null;

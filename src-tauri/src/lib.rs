@@ -91,10 +91,35 @@ impl Core {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
         }
-        let response = match body {
-            Some(body) => request.send_json(body),
-            None => request.call(),
-        };
+        self.answer(
+            path,
+            match body {
+                Some(body) => request.send_json(body),
+                None => request.call(),
+            },
+        )
+    }
+
+    /// Sends one screenshot the user attached to a report they are writing: the only file the
+    /// app ever uploads, and only into that report's evidence.
+    fn attach(&self, name: &str, mime: &str, picture: &[u8]) -> Result<Value, String> {
+        let path = "/api/app/reports/evidence";
+        let mut request = ureq::post(&format!("{}{}", self.site, path))
+            .timeout(Duration::from_secs(90))
+            .set("User-Agent", &format!("TF21-WARDEN/{VERSION}"))
+            .set("Content-Type", mime)
+            .set("X-File-Name", &header_safe(name));
+        if let Some(token) = self.token.lock().unwrap().as_deref() {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        self.answer(path, request.send_bytes(picture))
+    }
+
+    fn answer(
+        &self,
+        path: &str,
+        response: Result<ureq::Response, ureq::Error>,
+    ) -> Result<Value, String> {
         match response {
             Ok(r) if r.status() == 204 => Ok(Value::Null),
             Ok(r) => r
@@ -326,6 +351,16 @@ fn look(app: &AppHandle, core: &Shared) {
         _ => return,
     }
     let _ = app.emit("changed", ());
+}
+
+/// A file name as a header can carry it and the website's decodeURIComponent reads it back.
+fn header_safe(name: &str) -> String {
+    name.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// The app's windows show the app's own pages and nothing else.
@@ -603,6 +638,27 @@ fn api(
     result
 }
 
+/// A screenshot picked in the report form, as base64, on its way to that report's evidence.
+#[tauri::command(async)]
+fn attach(
+    core: State<'_, Shared>,
+    name: String,
+    mime: String,
+    data: String,
+) -> Result<Value, String> {
+    use base64::Engine as _;
+    if !["image/png", "image/jpeg", "image/webp", "image/gif"].contains(&mime.as_str()) {
+        return Err("Screenshots are PNG, JPEG, WebP or GIF pictures.".into());
+    }
+    let picture = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|_| "That picture could not be read.".to_string())?;
+    if picture.len() > 8 * 1024 * 1024 {
+        return Err("A screenshot can be up to 8 MB.".into());
+    }
+    core.attach(&name, &mime, &picture)
+}
+
 #[tauri::command(async)]
 fn refresh(app: AppHandle, core: State<'_, Shared>) -> Result<(), String> {
     core.refresh(&app)?;
@@ -786,6 +842,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             state,
             api,
+            attach,
             refresh,
             link,
             open_url,
@@ -919,6 +976,13 @@ mod tests {
         me["settings"]["autoseed"]["enabled"] = json!(false);
         assert!(!own_autoseed(&mut mine, &mut me));
         assert_eq!(me["settings"]["autoseed"]["enabled"], true);
+    }
+
+    #[test]
+    fn a_file_name_travels_in_a_header_whatever_is_in_it() {
+        assert_eq!(header_safe("clip_01-final.png"), "clip_01-final.png");
+        assert_eq!(header_safe("my shot (2).png"), "my%20shot%20%282%29.png");
+        assert_eq!(header_safe("écran\r\n.png"), "%C3%A9cran%0D%0A.png");
     }
 
     #[test]

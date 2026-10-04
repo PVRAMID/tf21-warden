@@ -116,6 +116,27 @@ export function useWarden() {
   return state;
 }
 
+/** Reads a website path now and again every `ms`; keeps the last good answer. */
+export function useRead<T>(path: string | null, ms = 0) {
+  const [data, setData] = useState<T | null>(null);
+  useEffect(() => {
+    setData(null);
+    if (!path) return;
+    let alive = true;
+    const read = () =>
+      api<T>(path)
+        .then((r) => alive && r && setData(r))
+        .catch(() => {});
+    void read();
+    const timer = ms ? setInterval(read, ms) : undefined;
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [path, ms]);
+  return data;
+}
+
 export const REASONS: Record<string, string> = {
   ready: "Ready for a seed call",
   update: "Update WARDEN to carry on",
