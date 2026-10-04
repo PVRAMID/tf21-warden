@@ -29,6 +29,8 @@ type ReportType = {
   id: string;
   label: string;
   short: string;
+  /** Said where the players are picked, for a kind of report that is rarely about one person. */
+  group?: string;
   questions: Question[];
 };
 type Config = {
@@ -49,7 +51,9 @@ type Config = {
     clips: number;
     screenshots: number;
     window_days: number;
+    suspects: number;
   };
+  unknown: { name: string; note: string };
   me: { steam_linked: boolean };
 };
 type Found = {
@@ -60,6 +64,11 @@ type Found = {
   matches: number;
   online: { slug: string; name: string } | null;
 };
+/** Someone the reporter could not name; staff identify them from the evidence. */
+type Unknown = { unknown: true };
+type Suspect = Found | Unknown;
+const isUnknown = (s: Suspect): s is Unknown => "unknown" in s;
+type Filed = { ref: string; suspect_name: string };
 type Mine = {
   ref: string;
   type: string;
@@ -73,7 +82,7 @@ type Shot = { id: string; name: string; preview: string };
 type Draft = {
   step: number;
   type: string;
-  suspect: Found | null;
+  suspects: Suspect[];
   clips: string[];
   shots: Shot[];
   server: string | null;
@@ -104,7 +113,7 @@ const localStamp = (date: Date) =>
 const blank = (): Draft => ({
   step: 0,
   type: "",
-  suspect: null,
+  suspects: [],
   clips: [""],
   shots: [],
   server: null,
@@ -229,17 +238,38 @@ const answered = (type: ReportType, given: Record<string, unknown>) =>
   });
 
 function Who({
+  config,
+  type,
   chosen,
-  choose,
+  change,
 }: {
-  chosen: Found | null;
-  choose: (player: Found | null) => void;
+  config: Config;
+  type: ReportType | undefined;
+  chosen: Suspect[];
+  change: (players: Suspect[]) => void;
 }) {
   const [q, setQ] = useState("");
   const [found, setFound] = useState<{ players: Found[]; online: number }>();
   const [error, setError] = useState("");
+  // The search is open until someone is on the report, and again on "Add another player".
+  const [adding, setAdding] = useState(!chosen.length);
+  const full = chosen.length >= config.limits.suspects;
+  const searching = adding && !full;
+  const add = (player: Suspect) => {
+    change([...chosen, player]);
+    setAdding(false);
+    setQ("");
+  };
+  const remove = (i: number) => {
+    const next = chosen.filter((_, j) => j !== i);
+    change(next);
+    if (!next.length) setAdding(true);
+  };
+  const players = found?.players.filter(
+    (p) => !chosen.some((c) => !isUnknown(c) && c.steam_id === p.steam_id),
+  );
   useEffect(() => {
-    if (chosen) return;
+    if (!searching) return;
     let alive = true;
     // A name needs two characters; nothing typed lists who is on now and who played today.
     const timer = setTimeout(
@@ -255,25 +285,95 @@ function Who({
       alive = false;
       clearTimeout(timer);
     };
-  }, [q, chosen]);
-  if (chosen)
-    return (
-      <div className="chosen">
-        <div>
-          <span className="label">Reporting</span>
-          <b>{chosen.name}</b>
-          <span className="small">
-            {chosen.steam_id}
-            {chosen.names.length
-              ? ` · also seen as ${chosen.names.join(", ")}`
-              : ""}
-          </span>
+  }, [q, searching]);
+  return (
+    <>
+      {type?.group && <p className="impact">{type.group}</p>}
+      {chosen.length > 0 && (
+        <ul className="named" aria-label="Players on this report">
+          {chosen.map((c, i) => (
+            <li
+              className="chosen"
+              key={isUnknown(c) ? `unknown-${i}` : c.steam_id}
+            >
+              <div>
+                <span className="label">Reporting</span>
+                <b>{isUnknown(c) ? config.unknown.name : c.name}</b>
+                <span className="small">
+                  {isUnknown(c)
+                    ? "Staff will try to work out who it was"
+                    : `${c.steam_id}${c.names.length ? ` · also seen as ${c.names.join(", ")}` : ""}`}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="text"
+                aria-label={`Remove ${isUnknown(c) ? config.unknown.name : c.name}`}
+                onClick={() => remove(i)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {chosen.some(isUnknown) && (
+        <p className="impact">{config.unknown.note}</p>
+      )}
+      {!full && (
+        <div className="actions add-player">
+          {!adding && (
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() => setAdding(true)}
+            >
+              <Plus size={12} /> Add another player
+            </button>
+          )}
+          <button
+            type="button"
+            className="text"
+            onClick={() => add({ unknown: true })}
+          >
+            {chosen.length
+              ? "Add someone you can't identify"
+              : "I don't know who it was"}
+          </button>
+          {chosen.length > 0 && (
+            <span className="small">
+              More than one player involved? Put them all on this report, up to{" "}
+              {config.limits.suspects}.
+            </span>
+          )}
         </div>
-        <button type="button" className="text" onClick={() => choose(null)}>
-          Change
-        </button>
-      </div>
-    );
+      )}
+      {searching && (
+        <WhoSearch
+          q={q}
+          setQ={setQ}
+          players={players}
+          error={error}
+          add={add}
+        />
+      )}
+    </>
+  );
+}
+
+function WhoSearch({
+  q,
+  setQ,
+  players,
+  error,
+  add,
+}: {
+  q: string;
+  setQ: (q: string) => void;
+  players: Found[] | undefined;
+  error: string;
+  add: (player: Found) => void;
+}) {
   return (
     <>
       <label className="search">
@@ -289,8 +389,8 @@ function Who({
       </label>
       {error && <p className="notice">{error}</p>}
       <ul className="rows found">
-        {found?.players.map((p) => (
-          <li key={p.steam_id} className="clickable" onClick={() => choose(p)}>
+        {players?.map((p) => (
+          <li key={p.steam_id} className="clickable" onClick={() => add(p)}>
             <b>{p.name}</b>
             <span className="meta">
               {p.online && (
@@ -306,7 +406,7 @@ function Who({
             </span>
           </li>
         ))}
-        {found && !found.players.length && (
+        {players && !players.length && (
           <li className="empty">
             {q.trim().length === 1
               ? "Type at least two characters."
@@ -486,7 +586,7 @@ function Wizard({
   config: Config;
   start: Draft;
   leave: () => void;
-  done: (ref: string) => void;
+  done: (filed: Filed[]) => void;
 }) {
   const [draft, setDraft] = useState(start);
   const [busy, setBusy] = useState(false);
@@ -501,7 +601,7 @@ function Wizard({
   // What still stands between this step and the next, in words; nothing means carry on.
   const missing = [
     !type && "Pick what you are reporting.",
-    !draft.suspect && "Pick the player.",
+    !draft.suspects.length && "Add the player.",
     clips.some((c) => !isClip(c)) && "Clip links start with https://",
     !type
       ? ""
@@ -513,13 +613,16 @@ function Wizard({
       "Confirm the report is true to the best of your knowledge.",
   ][draft.step];
   const submit = () => {
-    if (!type || !draft.suspect) return;
+    if (!type || !draft.suspects.length) return;
     setBusy(true);
     setError("");
-    api<{ report: { ref: string } }>("/api/app/reports", "POST", {
+    api<{ reports: Filed[] }>("/api/app/reports", "POST", {
       type: type.id,
-      suspect_steam_id: draft.suspect.steam_id,
-      suspect_name: draft.suspect.name,
+      suspects: draft.suspects.map((s) =>
+        isUnknown(s)
+          ? { unknown: true }
+          : { steam_id: s.steam_id, name: s.name },
+      ),
       server_id: draft.server,
       occurred_at: draft.when ? new Date(draft.when).toISOString() : null,
       description: draft.description.trim(),
@@ -532,7 +635,7 @@ function Wizard({
     })
       .then((r) => {
         kept = null;
-        done(r.report.ref);
+        done(r.reports);
       })
       .catch((e) => {
         setBusy(false);
@@ -590,8 +693,10 @@ function Wizard({
               comes first.
             </p>
             <Who
-              chosen={draft.suspect}
-              choose={(suspect) => set({ suspect })}
+              config={config}
+              type={type}
+              chosen={draft.suspects}
+              change={(suspects) => set({ suspects })}
             />
           </>
         )}
@@ -673,7 +778,7 @@ function Wizard({
             </div>
           </>
         )}
-        {draft.step === 4 && type && draft.suspect && (
+        {draft.step === 4 && type && draft.suspects.length > 0 && (
           <>
             <h1>
               CHECK <em>AND SEND.</em>
@@ -684,10 +789,23 @@ function Wizard({
                 <dd>{type.label}</dd>
               </div>
               <div>
-                <dt>Player</dt>
+                <dt>{draft.suspects.length === 1 ? "Player" : "Players"}</dt>
                 <dd>
-                  {draft.suspect.name}
-                  <span className="small"> {draft.suspect.steam_id}</span>
+                  {draft.suspects.map((s, i) =>
+                    isUnknown(s) ? (
+                      <div key={`unknown-${i}`}>{config.unknown.name}</div>
+                    ) : (
+                      <div key={s.steam_id}>
+                        {s.name}
+                        <span className="small"> {s.steam_id}</span>
+                      </div>
+                    ),
+                  )}
+                  {draft.suspects.length > 1 && (
+                    <span className="small">
+                      Each player gets their own report.
+                    </span>
+                  )}
                 </dd>
               </div>
               <div>
@@ -783,7 +901,7 @@ export function Reports({
   const [mine, setMine] = useState<Mine[] | null>(null);
   const [error, setError] = useState("");
   const [writing, setWriting] = useState<Draft | null>(kept);
-  const [sent, setSent] = useState("");
+  const [sent, setSent] = useState<Filed[]>([]);
   const [copied, setCopied] = useState(false);
   const me = state.me;
   const ready = Boolean(me?.profile && me.steam.linked);
@@ -817,9 +935,9 @@ export function Reports({
           kept = null;
           setWriting(null);
         }}
-        done={(ref) => {
+        done={(filed) => {
           setWriting(null);
-          setSent(ref);
+          setSent(filed);
         }}
       />
     );
@@ -831,40 +949,71 @@ export function Reports({
       </h1>
       <p className="lead">
         {config?.intro ||
-          "Cheating, teamkilling, griefing, abuse: tell the staff team, with evidence, and they will deal with it. Reports are worked in order and you are told the outcome."}
+          "Cheating, teamkilling, teaming, griefing, abuse: tell the staff team, with evidence, and they will deal with it. Reports are worked in order and you are told the outcome."}
       </p>
-      {sent && (
+      {sent.length > 0 && (
         <div className="panel sent">
           <span className="eyebrow">
-            <i className="dot live" /> Report received
+            <i className="dot live" />{" "}
+            {sent.length > 1
+              ? `${sent.length} reports received`
+              : "Report received"}
           </span>
-          <h2>
-            Your report is <em className="gold">{sent}</em>
-          </h2>
+          {sent.length > 1 ? (
+            <>
+              <h2>One report for each player</h2>
+              <ul className="rows">
+                {sent.map((r) => (
+                  <li
+                    key={r.ref}
+                    className="clickable"
+                    onClick={() => open(`/report/${r.ref}`)}
+                  >
+                    <span className="meta">
+                      <span>{r.ref}</span>
+                    </span>
+                    <b>{r.suspect_name}</b>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <h2>
+              Your report is <em className="gold">{sent[0].ref}</em>
+            </h2>
+          )}
           <p className="small">
-            It is with the TF21 staff team. You will be told when it is picked
-            up and when there is an outcome, by the TF21 bot on Discord and on
-            the report's own page.
+            {sent.length > 1
+              ? "They are with the TF21 staff team, who deal with each player in turn. You will be told when each is picked up and when there is an outcome, by the TF21 bot on Discord and on each report's own page."
+              : "It is with the TF21 staff team. You will be told when it is picked up and when there is an outcome, by the TF21 bot on Discord and on the report's own page."}
           </p>
           <div className="actions">
-            <button
-              type="button"
-              className="button"
-              onClick={() => open(`/report/${sent}`)}
-            >
-              Open the report <ExternalLink size={12} />
-            </button>
+            {sent.length === 1 && (
+              <button
+                type="button"
+                className="button"
+                onClick={() => open(`/report/${sent[0].ref}`)}
+              >
+                Open the report <ExternalLink size={12} />
+              </button>
+            )}
             <button
               type="button"
               className="text"
               onClick={() =>
-                navigator.clipboard.writeText(sent).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                })
+                navigator.clipboard
+                  .writeText(sent.map((r) => r.ref).join(", "))
+                  .then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  })
               }
             >
-              {copied ? "Copied" : "Copy the reference"}
+              {copied
+                ? "Copied"
+                : sent.length > 1
+                  ? "Copy the references"
+                  : "Copy the reference"}
             </button>
           </div>
         </div>
@@ -904,7 +1053,7 @@ export function Reports({
             className="button"
             disabled={!config}
             onClick={() => {
-              setSent("");
+              setSent([]);
               setWriting(blank());
             }}
           >

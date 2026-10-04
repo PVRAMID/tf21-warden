@@ -1793,6 +1793,16 @@ textarea.input {
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
+.named {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.add-player .small {
+  flex-basis: 100%;
+}
 .clip {
   display: flex;
   align-items: center;

@@ -304,6 +304,14 @@ const FIXTURES: Record<string, unknown> = {
         questions: [],
       },
       {
+        id: "teaming",
+        label: "Teaming",
+        short: "Players on opposing sides working together.",
+        group:
+          "Teaming takes more than one player. Add everyone who was in on it; if you did not catch a name, add them as identity unknown.",
+        questions: [],
+      },
+      {
         id: "griefing",
         label: "Griefing",
         short: "Wasting vehicles, blocking, sabotaging the team.",
@@ -356,6 +364,11 @@ const FIXTURES: Record<string, unknown> = {
       clips: 5,
       screenshots: 6,
       window_days: 90,
+      suspects: 10,
+    },
+    unknown: {
+      name: "Identity unknown",
+      note: "We may not be able to take action against a player we cannot identify. Staff will try to work out who it was from your evidence, so a clip matters even more here.",
     },
     me: { steam_linked: true },
   },
@@ -410,7 +423,12 @@ const FIXTURES: Record<string, unknown> = {
       },
     ],
   },
-  "/api/app/reports": { report: { ref: "R-9WX3HB", status: "open" } },
+  "/api/app/reports": {
+    reports: [
+      { ref: "R-9WX3HB", status: "open", suspect_name: "x_Reaper_x" },
+      { ref: "R-5TJ8QM", status: "open", suspect_name: "Identity unknown" },
+    ],
+  },
   "/api/servers": {
     servers: [
       server("uk1", "[EU/UK] #1 Task Force 21 - KOTH", 12, true),

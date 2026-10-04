@@ -15,6 +15,18 @@ export type Release = {
 
 export const CHANGELOG: Release[] = [
   {
+    version: "1.4.0",
+    date: "2026-10-04",
+    author: "PVRAMID",
+    title: "Report everyone involved at once",
+    changes: [
+      "One report can now name everyone involved. On the Who step, pick the first player, then use Add another player for the next, up to ten. A mass teamkill or a group working together no longer needs a report filled in for each of them: you describe it and attach your evidence once.",
+      "If you could not catch a name, add them as Identity unknown. Staff will try to work out who it was from your evidence, but we may not be able to take action against a player we cannot identify, so a clip matters even more.",
+      "Teaming is its own kind of report: players on opposing sides working together. It asks you to add everyone who was in on it.",
+      "Each player you name gets their own report ID, so staff can deal with them one at a time and you are told the outcome for each. Your reports list shows them all.",
+    ],
+  },
+  {
     version: "1.3.0",
     date: "2026-10-04",
     author: "PVRAMID",

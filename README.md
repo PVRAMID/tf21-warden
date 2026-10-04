@@ -1,7 +1,7 @@
 # TF21 WARDEN
 
 The source code of **TF21 WARDEN**, the Windows companion app of the
-[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.3.0**.
+[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.4.0**.
 
 > **This repository is public for one reason: so you can see exactly what the app does.**
 > It is here for privacy reassurance and transparency. It is **not** open source and it is
@@ -94,7 +94,7 @@ in `src-tauri/src/lib.rs`). You can check each of those statements against the c
 The installer for this version, as served from <https://tf21.net/warden>, has this SHA-256:
 
 ```
-e614b8b6b2b492a18f92c87d0b54383a5d0071f3b232b36c660ea50ba87450e3
+f9e1081c383217b8cd1668fb767f8e1ec5a6ad473407f84ba9246687e6429869
 ```
 
 Check yours in PowerShell with `Get-FileHash .\TF21-WARDEN-Setup.exe`. This page is not hosted
