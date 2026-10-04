@@ -22,14 +22,22 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOUSEEVENTF_MOVE, VK_CONTROL, VK_MENU, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetClientRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-    SetCursorPos, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    EnumWindows, GetAncestor, GetClassNameW, GetClientRect, GetForegroundWindow,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetCursorPos, SetForegroundWindow,
+    ShowWindow, WindowFromPoint, GA_ROOT, SW_RESTORE,
 };
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(240);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// PW_CLIENTONLY | PW_RENDERFULLCONTENT: the game's own picture, even behind other windows.
 const PRINT_FLAGS: PRINT_WINDOW_FLAGS = PRINT_WINDOW_FLAGS(3);
+/// How long to leave a screen that is loading, unknown, or not in front before looking again.
+const LOOK_AGAIN: Duration = Duration::from_millis(1500);
+
+/// The only text ever pasted into the game is a Server ID: letters, digits and hyphens.
+pub fn server_id(text: &str) -> bool {
+    (1..=80).contains(&text.len()) && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Word {
@@ -256,8 +264,13 @@ impl Game {
         Ok(lines)
     }
 
-    fn focus(&self) {
+    /// Brings the game to the front and says whether it got there. Every click, key and paste
+    /// below is sent only on a yes, so none of them can land in another program.
+    fn focus(&self) -> bool {
         unsafe {
+            if GetForegroundWindow() == self.hwnd {
+                return true;
+            }
             // Windows only lets a background app take the foreground straight after input,
             // so a tap of Alt comes first.
             keybd_event(VK_MENU.0 as u8, 0, Default::default(), 0);
@@ -265,10 +278,16 @@ impl Game {
             let _ = SetForegroundWindow(self.hwnd);
         }
         sleep(Duration::from_millis(500));
+        unsafe { GetForegroundWindow() == self.hwnd }
     }
-    fn click(&self, x: f32, y: f32) {
+    fn click(&self, x: f32, y: f32) -> bool {
         let (x, y) = (self.left + x.round() as i32, self.top + y.round() as i32);
-        self.focus();
+        // In front is not enough: another always-on-top window may be lying over the button.
+        if !self.focus()
+            || unsafe { GetAncestor(WindowFromPoint(POINT { x, y }), GA_ROOT) } != self.hwnd
+        {
+            return false;
+        }
         unsafe {
             // The menu only registers a click after it has seen the pointer move.
             let _ = SetCursorPos(x - 5, y - 5);
@@ -279,9 +298,12 @@ impl Game {
             sleep(Duration::from_millis(80));
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
         }
+        true
     }
-    fn key(&self, keys: &[u8]) {
-        self.focus();
+    fn key(&self, keys: &[u8]) -> bool {
+        if !self.focus() {
+            return false;
+        }
         unsafe {
             for k in keys {
                 keybd_event(*k, 0, Default::default(), 0);
@@ -291,17 +313,22 @@ impl Game {
                 keybd_event(*k, 0, KEYEVENTF_KEYUP, 0);
             }
         }
+        true
     }
-    fn paste(&self, text: &str) -> Result<(), &'static str> {
+    /// Whether the text was pasted. The clipboard is left alone unless the game is in front.
+    fn paste(&self, text: &str) -> Result<bool, &'static str> {
+        if !self.focus() {
+            return Ok(false);
+        }
         let mut clipboard = arboard::Clipboard::new().map_err(|_| "clipboard")?;
         let before = clipboard.get_text().ok();
         clipboard.set_text(text).map_err(|_| "clipboard")?;
-        self.key(&[VK_CONTROL.0 as u8, b'V']);
+        let pasted = self.key(&[VK_CONTROL.0 as u8, b'V']);
         sleep(Duration::from_millis(500));
         if let Some(before) = before {
             let _ = clipboard.set_text(before);
         }
-        Ok(())
+        Ok(pasted)
     }
 }
 
@@ -315,7 +342,10 @@ fn engine() -> Option<OcrEngine> {
 /// Launches the game if needed and joins the server with this Server ID. `Ok` means the game
 /// itself showed it is in the match, or queued for it; the website confirms the arrival from the
 /// server's roster.
-pub fn join(server_id: &str, stop: &AtomicBool, step: impl Fn(&str)) -> Result<(), &'static str> {
+pub fn join(id: &str, stop: &AtomicBool, step: impl Fn(&str)) -> Result<(), &'static str> {
+    if !server_id(id) {
+        return Err("bad_server_id");
+    }
     let engine = engine().ok_or("no_ocr")?;
     step("launching");
     if guard::game_pid().is_none() {
@@ -338,7 +368,16 @@ pub fn join(server_id: &str, stop: &AtomicBool, step: impl Fn(&str)) -> Result<(
         if window_at.get_or_insert_with(Instant::now).elapsed() > JOIN_TIMEOUT {
             return Err("join_timeout");
         }
-        match read(&g.lines(&engine).map_err(|_| "ocr_failed")?) {
+        // Each screen says how long to give the game before reading it again. Input that could
+        // not be sent, because the game was not in front, is simply tried again.
+        let sent = |done: bool, seconds: u64| {
+            if done {
+                Duration::from_secs(seconds)
+            } else {
+                LOOK_AGAIN
+            }
+        };
+        sleep(match read(&g.lines(&engine).map_err(|_| "ocr_failed")?) {
             Screen::InMatch => {
                 step("joined");
                 return Ok(());
@@ -350,24 +389,25 @@ pub fn join(server_id: &str, stop: &AtomicBool, step: impl Fn(&str)) -> Result<(
             }
             Screen::Confirm(x, y) => {
                 step("joining");
-                confirms += 1;
-                if confirms > 4 {
+                if confirms >= 4 {
                     return Err("join_refused");
                 }
-                g.click(x, y);
-                sleep(Duration::from_secs(6));
+                let clicked = g.click(x, y);
+                confirms += clicked as u32;
+                sent(clicked, 6)
             }
             Screen::IdBox(x, y) => {
                 // Still here after a lookup: the game did not find the server.
-                lookups += 1;
-                if lookups > 3 {
+                if lookups >= 3 {
                     return Err("server_not_found");
                 }
                 step("server_id");
-                g.paste(server_id)?;
-                step("lookup");
-                g.click(x, y);
-                sleep(Duration::from_secs(4));
+                let looked = g.paste(id)? && {
+                    step("lookup");
+                    g.click(x, y)
+                };
+                lookups += looked as u32;
+                sent(looked, 4)
             }
             // Back at the browser after pressing Join Match: the server was full and the game
             // has queued, whether or not the banner could be read.
@@ -377,27 +417,23 @@ pub fn join(server_id: &str, stop: &AtomicBool, step: impl Fn(&str)) -> Result<(
             }
             Screen::Browser(x, y) => {
                 step("join_by_id");
-                g.click(x, y);
-                sleep(Duration::from_secs(2));
+                sent(g.click(x, y), 2)
             }
             Screen::Deploy(x, y) => {
                 step("community");
-                g.click(x, y);
-                sleep(Duration::from_secs(3));
+                sent(g.click(x, y), 3)
             }
             Screen::MainMenu(x, y) => {
                 step("deploy");
-                g.click(x, y);
-                sleep(Duration::from_secs(2));
+                sent(g.click(x, y), 2)
             }
             Screen::Title => {
                 step("menu");
-                g.key(&[VK_SPACE.0 as u8]);
-                sleep(Duration::from_secs(3));
+                sent(g.key(&[VK_SPACE.0 as u8]), 3)
             }
             // Loading, or a screen this does not know: look again.
-            Screen::Unknown => sleep(Duration::from_millis(1500)),
-        }
+            Screen::Unknown => LOOK_AGAIN,
+        });
     }
 }
 
@@ -500,7 +536,28 @@ mod tests {
         assert_eq!(read(&[]), Screen::Unknown);
     }
 
-    /// Run by hand with the game open: `cargo test --lib live -- --ignored --nocapture`.
+    #[test]
+    fn only_a_server_id_is_ever_pasted() {
+        assert!(server_id("00000000-0000-0000-0000-000000000000"));
+        assert!(server_id("TF21UK1"));
+        assert!(!server_id(""));
+        assert!(!server_id("cmd /c calc"));
+        assert!(!server_id("https://example.com"));
+        assert!(!server_id(&"a".repeat(81)));
+    }
+
+    /// The whole walk, from a cold start onto a server, taking the mouse while it runs:
+    /// `SERVER_ID=... cargo test --lib live_join -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn live_join() {
+        let id = std::env::var("SERVER_ID").expect("SERVER_ID");
+        let result = join(&id, &AtomicBool::new(false), |step| println!("{step}"));
+        println!("{result:?}");
+        assert!(result.is_ok());
+    }
+
+    /// Run by hand with the game open: `cargo test --lib live_screen -- --ignored --nocapture`.
     #[test]
     #[ignore]
     fn live_screen() {

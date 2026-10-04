@@ -42,10 +42,16 @@ pub struct Core {
     /// What the user agreed to, and for which version: `{version, seeding}`. A new version
     /// asks again, and until the terms are accepted the app contacts nobody.
     consent: Mutex<Value>,
-    update_ready: AtomicBool,
-    /// The check made before anything else is shown: `{status, version, notes}`, where status
-    /// is checking, required (a newer version must be installed first) or clear.
+    /// Whether, when and for which servers this PC seeds: `{enabled, servers, days, from, to}`.
+    /// It is kept and decided here. The website holds a copy so it knows whom to ask, but its
+    /// copy is never what switches seeding on.
+    autoseed: Mutex<Value>,
+    /// The check made before anything else is shown: `{status}`, checking or clear.
     boot: Mutex<Value>,
+    /// A newer published version, once one is known: `{version, notes, changes, critical}`.
+    /// Installing it is the user's choice, unless `critical` says security or functionality:
+    /// then the app is locked, and does nothing, until it is installed.
+    update: Mutex<Value>,
     /// Set to have the update loop look again now rather than at its next turn.
     check_now: AtomicBool,
 }
@@ -64,6 +70,9 @@ impl Core {
                 "token": *self.token.lock().unwrap(),
                 "paused": self.paused.load(Ordering::Relaxed),
                 "consent": *self.consent.lock().unwrap(),
+                "autoseed": *self.autoseed.lock().unwrap(),
+                // Kept so a lock outlasts a restart with tf21.net out of reach.
+                "update": *self.update.lock().unwrap(),
             })
             .to_string(),
         );
@@ -126,13 +135,36 @@ impl Core {
 
     pub fn refresh(&self, app: &AppHandle) -> Result<(), String> {
         self.register()?;
-        let me = self.call("GET", "/api/app/me", None)?;
+        let mut me = self.call("GET", "/api/app/me", None)?;
+        let adopted = own_autoseed(&mut self.autoseed.lock().unwrap(), &mut me);
+        if adopted {
+            self.save();
+        }
         *self.me.lock().unwrap() = me;
         let _ = app.emit("changed", ());
         Ok(())
     }
 
-    /// Whether an auto-join could go ahead on this PC right now, and if not, why.
+    /// Records the seeding choice made on this PC and returns the one it replaces.
+    fn set_autoseed(&self, value: Value) -> Value {
+        let before = std::mem::replace(&mut *self.autoseed.lock().unwrap(), value);
+        self.save();
+        before
+    }
+
+    /// Whether this PC was opted in to seed that server; no servers chosen means any.
+    pub fn seeds(&self, slug: &str) -> bool {
+        self.autoseed.lock().unwrap()["servers"]
+            .as_array()
+            .is_some_and(|s| s.is_empty() || s.iter().any(|x| x == slug))
+    }
+
+    /// A critical update is waiting: until it is installed the app connects to nothing and
+    /// answers nothing.
+    pub fn locked(&self) -> bool {
+        self.update.lock().unwrap()["critical"].is_string()
+    }
+
     /// The terms were accepted for this very version.
     pub fn accepted(&self) -> bool {
         self.consent.lock().unwrap()["version"] == VERSION
@@ -159,7 +191,11 @@ impl Core {
         }
     }
 
+    /// Whether an auto-join could go ahead on this PC right now, and if not, why.
     pub fn availability(&self) -> (bool, &'static str) {
+        if self.locked() {
+            return (false, "update");
+        }
         if !self.seeding_agreed() {
             return (false, "no_consent");
         }
@@ -170,7 +206,7 @@ impl Core {
         if !me["steam"]["linked"].as_bool().unwrap_or(false) {
             return (false, "no_steam");
         }
-        let autoseed = &me["settings"]["autoseed"];
+        let autoseed = self.autoseed.lock().unwrap().clone();
         if !autoseed["enabled"].as_bool().unwrap_or(false) {
             return (false, "off");
         }
@@ -185,7 +221,7 @@ impl Core {
         {
             return (false, "snoozed");
         }
-        if !guard::within_now(autoseed) {
+        if !guard::within_now(&autoseed) {
             return (false, "hours");
         }
         if !guard::game_installed() {
@@ -216,6 +252,86 @@ impl Core {
             })),
         )
     }
+}
+
+/// Puts this PC's own seeding choice into what the website sent, so the screens and the checks
+/// both go by it. An install from before the choice was kept here has none, and takes the
+/// website's copy once: returns true when that happened.
+fn own_autoseed(mine: &mut Value, me: &mut Value) -> bool {
+    if mine.is_null() {
+        *mine = me["settings"]["autoseed"].clone();
+        return !mine.is_null();
+    }
+    if me["settings"].is_object() {
+        me["settings"]["autoseed"] = mine.clone();
+    }
+    false
+}
+
+/// Whether version `a` is later than `b`, by its numbers.
+fn newer(a: &str, b: &str) -> bool {
+    let parts = |v: &str| {
+        v.split('.')
+            .map(|n| n.parse().unwrap_or(0))
+            .collect::<Vec<u64>>()
+    };
+    parts(a) > parts(b)
+}
+
+/// What a published update is, from the website's answer to the updater: its notes, the
+/// changelog of every version this install is behind by, and whether any of them is critical.
+fn described(version: &str, notes: Option<&str>, raw: &Value) -> Value {
+    json!({
+        "version": version,
+        "notes": notes.unwrap_or_default(),
+        "changes": if raw["changes"].is_array() { raw["changes"].clone() } else { json!([]) },
+        "critical": raw["critical"]
+            .as_str()
+            .filter(|kind| matches!(*kind, "security" | "functionality")),
+    })
+}
+
+/// Asks tf21.net whether a newer version is out and records the answer. Nothing is installed
+/// from here. A new version is announced once on the card and explained on the Update page;
+/// one marked critical locks the app instead.
+fn look(app: &AppHandle, core: &Shared) {
+    let answer = tauri::async_runtime::block_on(async { Some(app.updater().ok()?.check().await) });
+    match answer {
+        Some(Ok(Some(update))) => {
+            let next = described(&update.version, update.body.as_deref(), &update.raw_json);
+            let heard = core.update.lock().unwrap()["version"] == next["version"];
+            let (was_locked, critical) = (core.locked(), next["critical"].is_string());
+            *core.update.lock().unwrap() = next.clone();
+            core.save();
+            if critical && !was_locked {
+                show_main(app);
+            } else if !critical && !heard {
+                core.notices.lock().unwrap().push_back(json!({
+                    "id": 0,
+                    "kind": "update",
+                    "title": format!("WARDEN {} is out", update.version),
+                    "body": next["notes"],
+                    "url": "",
+                    "image": "",
+                }));
+                show_alert(app, seed_card(core));
+            }
+        }
+        // Current after all: a lock left by an earlier answer is lifted.
+        Some(Ok(None)) => {
+            *core.update.lock().unwrap() = Value::Null;
+            core.save();
+        }
+        // No answer, as when offline, changes nothing.
+        _ => return,
+    }
+    let _ = app.emit("changed", ());
+}
+
+/// The app's windows show the app's own pages and nothing else.
+fn own_page(url: &tauri::Url) -> bool {
+    matches!(url.scheme(), "tauri" | "about")
+        || matches!(url.host_str(), Some("tauri.localhost" | "localhost"))
 }
 
 pub fn toast(app: &AppHandle, title: &str, body: &str) {
@@ -331,8 +447,8 @@ fn stream(app: AppHandle, core: Shared) {
     use std::io::{BufRead, BufReader};
     let mut wait = 2;
     loop {
-        // Nothing reaches tf21.net until the terms are accepted.
-        while !core.accepted() {
+        // Nothing reaches tf21.net until the terms are accepted, or while a critical update waits.
+        while !core.accepted() || core.locked() {
             thread::sleep(Duration::from_secs(1));
         }
         let opened = core.refresh(&app).and_then(|_| {
@@ -358,6 +474,9 @@ fn stream(app: AppHandle, core: Shared) {
             let (mut event, mut data) = (String::new(), String::new());
             for line in BufReader::new(response.into_reader()).lines() {
                 let Ok(line) = line else { break };
+                if core.locked() {
+                    break;
+                }
                 if let Some(name) = line.strip_prefix("event: ") {
                     event = name.to_string();
                 } else if let Some(chunk) = line.strip_prefix("data: ") {
@@ -391,72 +510,25 @@ fn heartbeats(app: AppHandle, core: Shared) {
     }
 }
 
-/// Before the app shows anything else it asks whether it is current. A newer version has to
-/// be installed (or the app closed); no answer, as when offline, lets the app through.
+/// Before the app shows anything else it asks whether a newer version is out, so that one
+/// marked critical locks it from the start. No answer, as when offline, lets the app through.
 fn boot_check(app: AppHandle, core: Shared) {
-    let found = tauri::async_runtime::block_on(async { app.updater().ok()?.check().await.ok()? });
-    if let Some(update) = found {
-        // Started quietly with Windows: nobody is looking, so just take the update.
-        let hidden = app
-            .get_webview_window("main")
-            .is_none_or(|w| !w.is_visible().unwrap_or(true));
-        if hidden {
-            let installed =
-                tauri::async_runtime::block_on(update.download_and_install(|_, _| {}, || {}));
-            if installed.is_ok() {
-                app.restart();
-            }
-        }
-        *core.boot.lock().unwrap() = json!({
-            "status": "required",
-            "version": update.version,
-            "notes": update.body.unwrap_or_default(),
-        });
-        show_main(&app);
-    } else {
-        *core.boot.lock().unwrap() = json!({ "status": "clear" });
-    }
+    look(&app, &core);
+    *core.boot.lock().unwrap() = json!({ "status": "clear" });
     let _ = app.emit("changed", ());
 }
 
 fn updates(app: AppHandle, core: Shared) {
     loop {
-        while !core.accepted() || core.boot.lock().unwrap()["status"] != "clear" {
-            thread::sleep(Duration::from_secs(5));
-        }
-        tauri::async_runtime::block_on(async {
-            let Ok(updater) = app.updater() else { return };
-            let Ok(Some(update)) = updater.check().await else {
-                return;
-            };
-            // Never restart under somebody: only when the window is tucked away and nothing is running.
-            let hidden = app
-                .get_webview_window("main")
-                .is_none_or(|w| !w.is_visible().unwrap_or(true));
-            if hidden && core.seed.lock().unwrap().phase == "idle" {
-                if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
-                    app.restart();
-                }
-            } else if !core.update_ready.swap(true, Ordering::Relaxed) {
-                // In use: say so on the card and let them choose the moment.
-                core.notices.lock().unwrap().push_back(json!({
-                    "id": 0,
-                    "kind": "update",
-                    "title": format!("WARDEN {} is ready", update.version),
-                    "body": update.body.unwrap_or_default(),
-                    "url": "",
-                    "image": "",
-                }));
-                show_alert(&app, seed_card(&core));
-                let _ = app.emit("changed", ());
-            }
-        });
         // Every three hours, or at once when the website says there is a new version.
         for _ in 0..(3 * 60 * 60 / 5) {
             if core.check_now.swap(false, Ordering::Relaxed) {
                 break;
             }
             thread::sleep(Duration::from_secs(5));
+        }
+        if core.accepted() {
+            look(&app, &core);
         }
     }
 }
@@ -476,7 +548,7 @@ fn state(app: AppHandle, core: State<'_, Shared>) -> Value {
         "steam_id": guard::steam_id(),
         "game_installed": guard::game_installed(),
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
-        "update_ready": core.update_ready.load(Ordering::Relaxed),
+        "update": *core.update.lock().unwrap(),
         "notice": core.notices.lock().unwrap().front(),
         "boot": *core.boot.lock().unwrap(),
         "consent": { "needed": !core.accepted(), "seeding": core.seeding_agreed() },
@@ -517,7 +589,18 @@ fn api(
     if !["GET", "POST", "PUT", "DELETE"].contains(&method.as_str()) {
         return Err("Unsupported method.".into());
     }
-    core.call(&method, &path, body.as_ref())
+    // The seeding choice is recorded here first; the website is then sent its copy.
+    let choice = body
+        .as_ref()
+        .filter(|_| method == "PUT" && path == "/api/app/settings")
+        .map(|b| b["autoseed"].clone())
+        .filter(Value::is_object);
+    let before = choice.map(|c| core.set_autoseed(c));
+    let result = core.call(&method, &path, body.as_ref());
+    if let (Err(_), Some(before)) = (&result, before) {
+        core.set_autoseed(before);
+    }
+    result
 }
 
 #[tauri::command(async)]
@@ -615,6 +698,21 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
     app.restart()
 }
 
+/// Runs WARDEN's own uninstaller, the one Windows' Installed apps list runs, and gets out of
+/// its way.
+#[tauri::command]
+fn uninstall(app: AppHandle) -> Result<(), String> {
+    let uninstaller = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .with_file_name("uninstall.exe");
+    std::process::Command::new(uninstaller).spawn().map_err(|_| {
+        "The uninstaller was not found. Remove TF21 WARDEN from Windows' Installed apps instead."
+            .to_string()
+    })?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
@@ -679,6 +777,12 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // A link in a news article opens in the browser; it never loads inside the app.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("own-pages")
+                .on_navigation(|_, url| own_page(url))
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             state,
             api,
@@ -693,6 +797,7 @@ pub fn run() {
             install_update,
             dismiss_notice,
             set_consent,
+            uninstall,
             quit
         ])
         .on_window_event(|window, event| {
@@ -718,6 +823,10 @@ pub fn run() {
                 .and_then(|text| serde_json::from_str(&text).ok())
                 .unwrap_or(Value::Null);
             let first_run = saved.is_null();
+            // A critical update that was never installed still locks this version.
+            let kept = &saved["update"];
+            let locked = kept["critical"].is_string()
+                && newer(kept["version"].as_str().unwrap_or_default(), VERSION);
             let core: Shared = Arc::new(Core {
                 site: test_site.clone().unwrap_or_else(|| DEFAULT_SITE.into()),
                 dir,
@@ -730,8 +839,20 @@ pub fn run() {
                 stop: AtomicBool::new(false),
                 notices: Mutex::new(VecDeque::new()),
                 consent: Mutex::new(saved["consent"].clone()),
-                update_ready: AtomicBool::new(false),
+                // A new install starts switched off, with the hours the website also starts from.
+                autoseed: Mutex::new(if first_run {
+                    json!({
+                        "enabled": false,
+                        "servers": [],
+                        "days": [0, 1, 2, 3, 4, 5, 6],
+                        "from": "09:00",
+                        "to": "17:00",
+                    })
+                } else {
+                    saved["autoseed"].clone()
+                }),
                 boot: Mutex::new(json!({ "status": if updating { "checking" } else { "clear" } })),
+                update: Mutex::new(if locked { kept.clone() } else { Value::Null }),
                 check_now: AtomicBool::new(false),
             });
             app.manage(core.clone());
@@ -742,9 +863,8 @@ pub fn run() {
                 }
                 core.save();
             }
-            // Terms waiting to be read open the window even on a quiet start.
-            if !core.accepted() || !std::env::args().any(|a| a == "--hidden") {
-                // (A required update found on a quiet start opens it too: see boot_check.)
+            // Terms waiting to be read, or a lock, open the window even on a quiet start.
+            if !core.accepted() || core.locked() || !std::env::args().any(|a| a == "--hidden") {
                 show_main(&handle);
             }
             thread::spawn({
@@ -774,4 +894,71 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_seeding_choice_on_this_pc_outranks_the_websites_copy() {
+        let mut mine = json!({ "enabled": false, "servers": [] });
+        let mut me = json!({ "settings": { "autoseed": { "enabled": true }, "sound": true } });
+        assert!(!own_autoseed(&mut mine, &mut me));
+        assert_eq!(me["settings"]["autoseed"], mine);
+        assert_eq!(me["settings"]["sound"], true);
+        assert_eq!(mine["enabled"], false);
+    }
+
+    #[test]
+    fn an_install_with_no_choice_of_its_own_takes_the_websites_once() {
+        let mut mine = Value::Null;
+        let mut me = json!({ "settings": { "autoseed": { "enabled": true } } });
+        assert!(own_autoseed(&mut mine, &mut me));
+        assert_eq!(mine["enabled"], true);
+        me["settings"]["autoseed"]["enabled"] = json!(false);
+        assert!(!own_autoseed(&mut mine, &mut me));
+        assert_eq!(me["settings"]["autoseed"]["enabled"], true);
+    }
+
+    #[test]
+    fn versions_compare_by_their_numbers() {
+        assert!(newer("1.10.0", "1.9.9"));
+        assert!(newer("2.0.0", "1.99.99"));
+        assert!(!newer("1.2.3", "1.2.3"));
+        assert!(!newer("1.2.2", "1.2.3"));
+        assert!(!newer("", "1.2.3"));
+    }
+
+    #[test]
+    fn an_update_is_optional_unless_the_website_names_it_critical() {
+        let changes = json!([{ "version": "1.3.0", "title": "Faster joins" }]);
+        let plain = described("1.3.0", Some("Notes"), &json!({ "changes": changes }));
+        assert_eq!(plain["critical"], Value::Null);
+        assert_eq!(plain["changes"], changes);
+        assert_eq!(plain["notes"], "Notes");
+        let odd = described(
+            "1.3.0",
+            None,
+            &json!({ "critical": "because", "changes": "x" }),
+        );
+        assert_eq!(odd["critical"], Value::Null);
+        assert_eq!(odd["changes"], json!([]));
+        for kind in ["security", "functionality"] {
+            assert_eq!(
+                described("1.3.0", None, &json!({ "critical": kind }))["critical"],
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_apps_own_pages_load_in_its_windows() {
+        let page = |url: &str| own_page(&url.parse().unwrap());
+        assert!(page("http://tauri.localhost/index.html"));
+        assert!(page("http://tauri.localhost/alert.html"));
+        assert!(page("about:blank"));
+        assert!(!page("https://tf21.net/blog/x"));
+        assert!(!page("https://example.com/"));
+    }
 }

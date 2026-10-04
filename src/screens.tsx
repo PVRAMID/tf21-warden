@@ -404,6 +404,13 @@ export function News({
             {/* Staff-written HTML from the website's own blog; the app's CSP blocks any script in it. */}
             <div
               className="prose"
+              // A link in a dispatch opens in the browser, never inside the app.
+              onClick={(e) => {
+                const link = (e.target as HTMLElement).closest("a");
+                if (!link) return;
+                e.preventDefault();
+                open(link.getAttribute("href") || "");
+              }}
               dangerouslySetInnerHTML={{
                 // Pictures in a dispatch are addressed relative to the website.
                 __html: (post.content_html || "").replaceAll(
@@ -808,7 +815,7 @@ export function Settings({
         </Panel>
         <Panel
           title="This PC"
-          hint={`WARDEN ${state.version}. Updates install themselves while the window is closed.`}
+          hint={`WARDEN ${state.version}. Updates are never installed without you: when one is out, the Update page shows what it changes.`}
         >
           <Switch
             checked={state.autostart}
@@ -827,7 +834,7 @@ export function Settings({
             hint="Ignore every seed call on this PC until you switch this off."
           />
           <div className="actions">
-            {state.update_ready && (
+            {state.update && (
               <button
                 type="button"
                 className="button"
@@ -835,7 +842,7 @@ export function Settings({
                   invoke("install_update").catch((e) => setFailed(String(e)))
                 }
               >
-                Update and restart
+                Update to {state.update.version} and restart
               </button>
             )}
             <button

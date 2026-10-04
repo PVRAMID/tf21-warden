@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Bell,
   Crosshair,
+  Download,
   Home as HomeIcon,
   ListOrdered,
   Minus,
@@ -26,13 +27,7 @@ import mark from "./mark.svg";
 import { api, invoke, listen, useWarden, type Notification } from "./bridge";
 import { Home, Inbox, News, Seeding, Servers, Settings } from "./screens";
 import { Consent } from "./terms";
-import {
-  Changelog,
-  Competitions,
-  Leaderboards,
-  Record,
-  UpdateGate,
-} from "./more";
+import { Changelog, Competitions, Leaderboards, Record, Update } from "./more";
 
 const TABS = [
   ["home", "Home", HomeIcon],
@@ -43,6 +38,8 @@ const TABS = [
   ["news", "News", Newspaper],
   ["seeding", "Seeding", Radio],
   ["inbox", "Inbox", Bell],
+  // Only there while a newer version is out.
+  ["update", "Update", Download],
   ["changelog", "What's new", Sparkles],
   ["settings", "Settings", Cog],
 ] as const;
@@ -66,9 +63,14 @@ function App() {
     if (!state?.online) return;
     void loadInbox();
     const stop = listen("notify", loadInbox);
-    // "Open" on the popup card lands here.
-    const stopGoto = listen("goto", (payload) => {
+    return () => void stop.then((off) => off());
+  }, [state?.online]);
+  useEffect(() => {
+    document.addEventListener("contextmenu", (e) => e.preventDefault());
+    // The button on the popup card lands here.
+    const stop = listen("goto", (payload) => {
       const n = payload as Notification;
+      if (n.kind === "update") return go("update");
       void api(`/api/app/feed/${n.id}/open`, "POST", {})
         .catch(() => {})
         .then(loadInbox);
@@ -77,13 +79,7 @@ function App() {
       else if (n.url) void invoke("open_url", { url: n.url });
       else go("inbox");
     });
-    return () => {
-      void stop.then((off) => off());
-      void stopGoto.then((off) => off());
-    };
-  }, [state?.online]);
-  useEffect(() => {
-    document.addEventListener("contextmenu", (e) => e.preventDefault());
+    return () => void stop.then((off) => off());
   }, []);
   if (!state) return null;
 
@@ -92,9 +88,10 @@ function App() {
     setTab(next);
   };
   const unread = inbox.filter((n) => !n.opened).length;
-  // What stands between the user and the app: an update first, then the terms.
+  // What stands between the user and the app: the update check and a critical update first,
+  // then the terms.
   const gate =
-    state.boot.status !== "clear"
+    state.boot.status !== "clear" || state.update?.critical
       ? "update"
       : state.consent.needed
         ? "terms"
@@ -139,19 +136,22 @@ function App() {
         aria-label="Sections"
         hidden={Boolean(gate) || reviewing}
       >
-        {TABS.map(([id, label, Icon]) => (
-          <button
-            type="button"
-            key={id}
-            className={tab === id ? "on" : ""}
-            aria-current={tab === id ? "page" : undefined}
-            onClick={() => go(id)}
-          >
-            <Icon size={16} strokeWidth={1.7} />
-            {label}
-            {id === "inbox" && unread > 0 && <i>{unread}</i>}
-          </button>
-        ))}
+        {TABS.filter(([id]) => id !== "update" || state.update).map(
+          ([id, label, Icon]) => (
+            <button
+              type="button"
+              key={id}
+              className={tab === id ? "on" : ""}
+              aria-current={tab === id ? "page" : undefined}
+              onClick={() => go(id)}
+            >
+              <Icon size={16} strokeWidth={1.7} />
+              {label}
+              {id === "inbox" && unread > 0 && <i>{unread}</i>}
+              {id === "update" && <i>1</i>}
+            </button>
+          ),
+        )}
         <div className="who">
           {me?.profile ? (
             <>
@@ -174,7 +174,7 @@ function App() {
       </nav>
       {gate === "update" && (
         <main className="view gate">
-          <UpdateGate state={state} />
+          <Update state={state} />
         </main>
       )}
       {(gate === "terms" || (!gate && reviewing)) && (
@@ -193,6 +193,12 @@ function App() {
         {tab === "competitions" && <Competitions />}
         {tab === "leaderboards" && <Leaderboards />}
         {tab === "changelog" && <Changelog version={state.version} />}
+        {tab === "update" &&
+          (state.update ? (
+            <Update state={state} />
+          ) : (
+            <Changelog version={state.version} />
+          ))}
         {tab === "home" && <Home state={state} inbox={inbox} go={go} />}
         {tab === "servers" && <Servers state={state} />}
         {tab === "news" && (

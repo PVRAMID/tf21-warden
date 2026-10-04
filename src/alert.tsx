@@ -58,21 +58,13 @@ function Notice({ notice, site }: { notice: Notification; site: string }) {
         />
       </div>
       <div className="actions">
-        {notice.kind === "update" ? (
-          <button
-            className="button"
-            onClick={() => {
-              void dismiss(false);
-              void invoke("install_update");
-            }}
-          >
-            Update now
-          </button>
-        ) : (
-          <button className="button" onClick={() => dismiss(true)}>
-            {notice.url ? "Open" : "Open inbox"}
-          </button>
-        )}
+        <button className="button" onClick={() => dismiss(true)}>
+          {notice.kind === "update"
+            ? "See what's new"
+            : notice.url
+              ? "Open"
+              : "Open inbox"}
+        </button>
         <button className="text" onClick={() => dismiss(false)}>
           {notice.kind === "update" ? "Later" : "Dismiss"}
         </button>

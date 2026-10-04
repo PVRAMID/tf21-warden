@@ -1,7 +1,7 @@
 # TF21 WARDEN
 
 The source code of **TF21 WARDEN**, the Windows companion app of the
-[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.2.2**.
+[Task Force 21](https://tf21.net) WARDOGS community. This is version **1.2.3**.
 
 > **This repository is public for one reason: so you can see exactly what the app does.**
 > It is here for privacy reassurance and transparency. It is **not** open source and it is
@@ -15,7 +15,9 @@ WARDEN sits in the system tray and:
 - shows TF21 announcements, news, live server status, competitions and leaderboards, and a
   signed-in member's own record;
 - delivers desktop notifications from TF21, and keeps an inbox of them;
-- keeps itself up to date from tf21.net;
+- tells you when a new version is out and shows you what it changes; you decide whether to
+  install it (only an update marked critical, for security or because old versions can no
+  longer work, has to be installed for the app to carry on);
 - and, **only for people who opt in**, answers *seed calls*: it launches WARDOGS, joins a quiet
   TF21 server, and closes the game again when the server is seeded.
 
@@ -83,6 +85,90 @@ window only**, reads them on your PC, and discards them at once; they are never 
 It does not read your files, browser, passwords or messages, record what you type, capture your
 desktop or other windows, use your camera or microphone, or run with administrator rights. You
 can check each of those statements against the code above.
+
+## Security: what could go wrong, and what stops it
+
+The installer for this version, as served from <https://tf21.net/warden>, has this SHA-256:
+
+```
+f4dfa50c5e90e7937ebb1d13f312de2756728c9e1f43f20d2a1ccfe8a83f57ee
+```
+
+Check yours in PowerShell with `Get-FileHash .\TF21-WARDEN-Setup.exe`. This page is not hosted
+on tf21.net, so the two would both have to be tampered with for a swapped installer to pass.
+
+### Updates
+
+Every update is signed (minisign, through Tauri's updater). The private half of the signing key
+exists only on the developer's build machine: it is **not on tf21.net**, not in this repository
+and never sent anywhere. The public half is compiled into the app
+(`src-tauri/tauri.conf.json`), and the app refuses any update whose signature does not verify
+against it. Somebody who took over tf21.net, or sat between you and it, could stop you getting
+an update. They could not make the app install theirs.
+
+Updates are also not installed behind your back. The app tells you a new version is out, shows
+its changelog on the Update page, and installs it when you press Update now. The exception is an
+update marked critical (a security fix, or one without which the app can no longer work with
+tf21.net): the app then shuts itself off, connecting to nothing and answering no seed calls,
+until you either update or uninstall. That mark is the website's word and is not covered by the
+signature, so a hijacked tf21.net could lock installs. It still could not make them install
+anything that TF21 did not sign. See `look` and `described` in
+[`src-tauri/src/lib.rs`](src-tauri/src/lib.rs).
+
+What that does not cover, said plainly:
+
+- The first installer is not yet signed with a Windows code-signing certificate, which is why
+  Windows shows its "protected your PC" prompt. Use the SHA-256 above.
+- TF21 builds the installer from this source, and the build is not bit-for-bit reproducible.
+  This repository shows what the code does; you are still trusting TF21 to have built it from
+  what is shown, as you are with any app you do not build yourself.
+
+### What tf21.net can make the app do
+
+The website can send an install five things: a notification (or the removal of one), a seed
+call, word that a seed call has ended, word that your sign-in changed, and word that a new
+version exists. None of them carries code, a command, a file, a screen position or a key press.
+See `dispatch` in [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs).
+
+A seed call names a server and its Server ID, and nothing else that matters. Everything that
+decides whether the app acts on it is on your PC:
+
+| Decided on your PC | Where |
+|---|---|
+| That you agreed to the automatic seeding agreement, for this version | `seeding_agreed` in `lib.rs` |
+| That automatic seeding is switched on, for that server, at this hour. The choice is stored on your PC; the website's copy is only how it knows whom to ask | `own_autoseed`, `availability` and `seeds` in `lib.rs` |
+| That you have not paused or snoozed it, and are not in a game or a full-screen app | `availability` in `lib.rs`, `guard.rs` |
+| A countdown you can cancel, never shorter than 15 seconds | `seconds` in `seed.rs` |
+| Where to click: the words read off the WARDOGS window, never a position sent by the website | `read` in `driver.rs` |
+| That WARDOGS is the window in front, and under the pointer, before any click, key or paste | `focus` and `click` in `driver.rs` |
+| That the one thing pasted is a Server ID: letters, digits and hyphens | `server_id` in `driver.rs` |
+
+So the worst a hijacked tf21.net could do through seed calls is this: people who have agreed,
+switched seeding on, are inside their chosen hours and are not using their PC would see a
+countdown and, if they did not cancel it, WARDOGS would start through Steam and join a WARDOGS
+server of the attacker's choosing. It could also send a notification with a misleading link,
+which opens in your browser only if you click it. It could not run anything, install anything,
+or click or type outside WARDOGS.
+
+### Signing in, and keys
+
+The app holds no password, API key or shared secret. On first run the website issues the
+install a random token, kept in the app's settings file in your Windows profile; the website
+stores only a hash of it. Signing in happens on tf21.net in your own browser, with Discord's
+login, and is tied to the install by a six-digit number that only the app shows. The app never
+sees a password or a Discord token.
+
+### The game and its anti-cheat
+
+WARDOGS has its own anti-cheat. WARDEN does not read or change the game's memory or files, puts
+nothing inside the game's process and passes it no launch options. It starts the game through
+Steam (`steam://run`), reads a picture of the game's window, and presses menu buttons with
+ordinary simulated mouse and keyboard input, never once you are in a match. The only thing it
+ever does to the game's process is close it, and only a game it started itself.
+
+None of that is what anti-cheat exists to catch. But TF21 does not make WARDOGS or its
+anti-cheat and cannot make promises on its developers' behalf. Automatic seeding is optional;
+without it the app never goes near the game beyond handing Steam a join link.
 
 ## AI disclosure
 

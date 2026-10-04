@@ -7,6 +7,12 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 const SNOOZE: Duration = Duration::from_secs(60 * 60);
+/// However short a countdown the website asks for, there is always this long to say no.
+const SHORTEST_COUNTDOWN: u64 = 15;
+
+fn seconds(asked: &Value) -> u64 {
+    asked.as_u64().unwrap_or(60).max(SHORTEST_COUNTDOWN)
+}
 
 pub struct Seed {
     /// idle | countdown | launching | seeding | closing
@@ -114,6 +120,10 @@ pub fn offer(app: &AppHandle, core: &Shared, offer: Value) {
     if !available {
         return respond(core, &offer, "declined", reason);
     }
+    // Only for a server this PC was opted in to, whatever the website believes.
+    if !core.seeds(offer["server"]["slug"].as_str().unwrap_or_default()) {
+        return respond(core, &offer, "declined", "off");
+    }
     set(app, core, |s| s.offer = offer.clone());
     let name = server_name(&offer);
     toast(
@@ -121,14 +131,7 @@ pub fn offer(app: &AppHandle, core: &Shared, offer: Value) {
         "Seed call",
         &format!("{name} needs seeders. Joining in a minute unless you cancel."),
     );
-    match countdown(
-        app,
-        core,
-        "countdown",
-        offer["countdown"].as_u64().unwrap_or(60),
-    )
-    .as_deref()
-    {
+    match countdown(app, core, "countdown", seconds(&offer["countdown"])).as_deref() {
         Some("snooze") => {
             *core.snoozed_until.lock().unwrap() = Some(Instant::now() + SNOOZE);
             respond(core, &offer, "declined", "snoozed");
@@ -192,13 +195,7 @@ pub fn end(app: &AppHandle, core: &Shared, data: Value) {
                 "Seeding complete",
                 "Thank you. WARDOGS will close in a minute unless you choose to stay.",
             );
-            let stay = countdown(
-                app,
-                core,
-                "closing",
-                data["countdown"].as_u64().unwrap_or(60),
-            )
-            .as_deref()
+            let stay = countdown(app, core, "closing", seconds(&data["countdown"])).as_deref()
                 == Some("stay");
             if !stay {
                 guard::kill_game();
@@ -252,6 +249,20 @@ pub fn test(app: &AppHandle, core: &Shared, slug: &str) -> Result<(), String> {
         "join_refused" => "The game would not let you into the server. It may be full.".to_string(),
         "no_ocr" => "Auto-join reads the game's screen, and this PC has no Windows text recognition language installed.".to_string(),
         "server_not_found" => "The game could not find the server.".to_string(),
+        "bad_server_id" => "The website sent something that is not a Server ID, so nothing was typed.".to_string(),
         other => format!("Auto-join failed ({other})."),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_countdown_is_never_shorter_than_the_floor() {
+        assert_eq!(seconds(&json!(0)), SHORTEST_COUNTDOWN);
+        assert_eq!(seconds(&json!(5)), SHORTEST_COUNTDOWN);
+        assert_eq!(seconds(&json!(90)), 90);
+        assert_eq!(seconds(&Value::Null), 60);
+    }
 }

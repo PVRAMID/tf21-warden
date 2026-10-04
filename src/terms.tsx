@@ -19,7 +19,7 @@ const DOES = [
   "Sits in your system tray and starts with Windows. You can switch that off in Settings, and quit from the tray at any time.",
   "Connects to tf21.net, and only tf21.net, over an encrypted connection, and keeps that connection open so notifications and seed calls arrive at once.",
   "Shows you TF21 announcements, news, server status, competitions, leaderboards and, once you sign in, your own record.",
-  "Checks tf21.net for a newer version when it starts, before anything else, and while it runs. A newer version has to be installed before the app carries on. Every update is signed by TF21, and after every update these terms are shown to you again.",
+  "Checks tf21.net for a newer version when it starts, before anything else, and while it runs. It tells you when there is one and shows you what it changes, and installs it only when you say so. The one exception is an update TF21 marks as critical, for security or because the old version can no longer work with tf21.net: until that is installed the app shuts itself off, and you can update or uninstall. Every update is signed by TF21, and after every update these terms are shown to you again.",
 ];
 const SEES = [
   "Whether WARDOGS is installed, by reading Steam's own list of installed games, and whether WARDOGS is running.",
@@ -49,8 +49,8 @@ const NEVER = [
 ];
 const SEEDING = [
   "Start WARDOGS through Steam when TF21 calls for seeders, during the days and hours you set, on the servers you choose.",
-  "Always show a countdown first, which you can cancel or snooze. It will not start while another game or a full-screen app is running, or while WARDOGS is already open.",
-  "Bring the game to the front and take control of your mouse and keyboard for the few seconds it takes to work the menus: it presses a key on the title screen, clicks Deploy, Community and Join by ID, pastes the server's ID and clicks Join Match. If you are using the PC at that moment, your pointer will move.",
+  "Always show a countdown first, of at least 15 seconds, which you can cancel or snooze. It will not start while another game or a full-screen app is running, or while WARDOGS is already open.",
+  "Bring the game to the front and take control of your mouse and keyboard for the few seconds it takes to work the menus: it presses a key on the title screen, clicks Deploy, Community and Join by ID, pastes the server's ID and clicks Join Match. If you are using the PC at that moment, your pointer will move. It clicks and types only while WARDOGS is the window in front, so nothing is sent to another program.",
   "Use your clipboard to paste the server's ID, then put back the text that was there.",
   "Read the WARDOGS window, and only that window, to know which menu is showing. The pictures are read on your PC by Windows' own text recognition and thrown away at once. They are never saved and never leave your PC.",
   "Close WARDOGS when seeding is over, after a countdown you can stop by choosing to stay. It only ever closes a game it started itself.",
@@ -105,6 +105,24 @@ function SeedingText() {
         switched off and everything else works as normal. You can agree later,
         or withdraw by switching automatic seeding off or pausing it from the
         tray.
+      </p>
+      <p>
+        Your seeding choice is kept on this PC. Whether automatic seeding is on,
+        and for which servers and hours, is stored by the app itself; tf21.net
+        is sent a copy so it knows whom to ask. The website cannot switch
+        seeding on for you, change your hours or servers, or shorten the
+        countdown below 15 seconds.
+      </p>
+      <p>
+        WARDOGS has its own anti-cheat. WARDEN does not read or change the
+        game's memory or files, puts nothing inside the game and passes it no
+        launch options: it starts it through Steam, as the Play button does, and
+        presses menu buttons with ordinary simulated mouse and keyboard input,
+        never once you are in a match. None of that is what anti-cheat is there
+        to catch, but TF21 does not make the game or its anti-cheat and cannot
+        make promises on its developers' behalf. If that worries you, leave
+        automatic seeding off: the rest of WARDEN only ever hands Steam a join
+        link.
       </p>
       <p>
         WARDEN works the game's menus, not the game. It gives you no advantage
@@ -204,7 +222,7 @@ const STEPS: Step[] = [
       </>
     ),
     body: <List items={SEES} />,
-    tick: "I understand what WARDEN does on my PC and what it can see, including that it starts with Windows and updates itself.",
+    tick: "I understand what WARDEN does on my PC and what it can see, including that it starts with Windows and checks for updates.",
   },
   {
     id: "sends",

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Download, ExternalLink } from "lucide-react";
 import { api, invoke, type State } from "./bridge";
-import { CHANGELOG } from "./changelog";
+import { CHANGELOG, type Release } from "./changelog";
 import type { Tab } from "./main";
 
 type Go = (tab: Tab, slug?: string | null) => void;
@@ -438,7 +438,20 @@ export function Changelog({ version }: { version: string }) {
       <h1>
         WHAT'S <em>NEW.</em>
       </h1>
-      {CHANGELOG.map((r) => (
+      <Releases items={CHANGELOG} />
+    </section>
+  );
+}
+
+const CRITICAL = {
+  security: "Security update",
+  functionality: "Critical fix",
+};
+
+function Releases({ items }: { items: Release[] }) {
+  return (
+    <>
+      {items.map((r) => (
         <div className="panel" key={r.version}>
           <div className="panel-head">
             <span className="numeral" aria-hidden="true">
@@ -448,6 +461,7 @@ export function Changelog({ version }: { version: string }) {
               <h2>{r.title}</h2>
               <p className="small">
                 {day(r.date)} · by {r.author}
+                {r.critical && <b className="hot"> · {CRITICAL[r.critical]}</b>}
               </p>
             </div>
           </div>
@@ -458,15 +472,28 @@ export function Changelog({ version }: { version: string }) {
           </ul>
         </div>
       ))}
-    </section>
+    </>
   );
 }
 
-/** Shown before anything else when the app is behind the published version. */
-export function UpdateGate({ state }: { state: State }) {
+/**
+ * The Update page: what a newer version changes, and the button that installs it. Updating is
+ * the user's choice, so this is an ordinary page. A critical update makes it the only page: the
+ * core has shut the app off, and the ways out are to update, uninstall or close.
+ */
+export function Update({ state }: { state: State }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (state.boot.status === "checking")
+  const update = state.update;
+  const act = (command: string) => {
+    setBusy(true);
+    setError("");
+    invoke(command).catch((e) => {
+      setBusy(false);
+      setError(String(e));
+    });
+  };
+  if (!update)
     return (
       <section className="terms boot">
         <span className="eyebrow">
@@ -482,40 +509,72 @@ export function UpdateGate({ state }: { state: State }) {
         </p>
       </section>
     );
+  const locked = update.critical;
   return (
-    <section className="terms boot">
+    <section className={locked ? "terms" : undefined}>
       <span className="eyebrow">
-        <i className="dot live" />
-        Version {state.boot.version} is out · you have {state.version}
+        <i className={`dot ${locked ? "hot" : "live"}`} />
+        {locked ? `${CRITICAL[locked]} · ` : ""}
+        Version {update.version} is out · you have {state.version}
       </span>
       <h1>
-        UPDATE <em>REQUIRED.</em>
+        {locked ? (
+          <>
+            UPDATE <em>REQUIRED.</em>
+          </>
+        ) : (
+          <>
+            AN UPDATE <em>IS OUT.</em>
+          </>
+        )}
       </h1>
       <p className="lead">
-        A newer WARDEN has been published. Update to carry on, or close the app.
-        It takes a few seconds and the app restarts by itself.
+        {locked === "security" &&
+          "This update fixes a security problem, so WARDEN has shut itself off on this PC until it is installed. It is not connected to TF21 and will not answer seed calls. Update to carry on, or uninstall WARDEN if you would rather not."}
+        {locked === "functionality" &&
+          "This version of WARDEN can no longer work with tf21.net, so it has shut itself off until the update is installed. Update to carry on, or uninstall WARDEN if you would rather not."}
+        {!locked &&
+          "Updating is your choice: nothing is installed unless you press Update now, and WARDEN carries on working as it is until you do. This is what the update changes."}
       </p>
-      {state.boot.notes && <p className="impact">{state.boot.notes}</p>}
+      {update.changes.length ? (
+        <Releases items={update.changes} />
+      ) : (
+        update.notes && <p className="impact">{update.notes}</p>
+      )}
+      <p className="small">
+        Updating takes a few seconds. The update is checked against TF21's
+        signature before it is installed, the app restarts by itself, and it
+        shows you its terms again.
+      </p>
       {error && <p className="notice">{error}</p>}
       <div className="actions">
         <button
           type="button"
           className="button"
           disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setError("");
-            invoke("install_update").catch((e) => {
-              setBusy(false);
-              setError(String(e));
-            });
-          }}
+          onClick={() => act("install_update")}
         >
           <Download size={13} /> {busy ? "Updating…" : "Update now"}
         </button>
-        <button type="button" className="text" onClick={() => invoke("quit")}>
-          Close WARDEN
-        </button>
+        {locked && (
+          <>
+            <button
+              type="button"
+              className="button ghost"
+              disabled={busy}
+              onClick={() => act("uninstall")}
+            >
+              Uninstall WARDEN
+            </button>
+            <button
+              type="button"
+              className="text"
+              onClick={() => invoke("quit")}
+            >
+              Close WARDEN
+            </button>
+          </>
+        )}
       </div>
     </section>
   );

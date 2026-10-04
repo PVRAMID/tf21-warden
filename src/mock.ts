@@ -60,14 +60,37 @@ const state: State = {
   steam_id: "76561198000000001",
   game_installed: true,
   autostart: true,
-  update_ready: false,
-  boot: query.has("update")
+  boot: { status: "clear" },
+  // ?update for one you may take or leave, ?update=security or =functionality for a lock.
+  update: query.has("update")
     ? {
-        status: "required",
-        version: "1.3.0",
+        version: "1.3.1",
         notes: "Faster joins and a fix for the inbox.",
+        changes: [
+          {
+            version: "1.3.1",
+            date: "2026-11-02",
+            author: "PVRAMID",
+            title: "A fix for the inbox",
+            changes: ["Clearing a notification no longer brings it back."],
+            ...(query.get("update")
+              ? { critical: query.get("update") as "security" }
+              : {}),
+          },
+          {
+            version: "1.3.0",
+            date: "2026-10-20",
+            author: "PVRAMID",
+            title: "Faster joins",
+            changes: [
+              "Automatic joins read the game's menus sooner.",
+              "The Seeding tab shows how long each call lasted.",
+            ],
+          },
+        ],
+        critical: (query.get("update") || null) as "security" | null,
       }
-    : { status: "clear" },
+    : null,
   consent: { needed: query.has("terms"), seeding: !query.has("noseed") },
   notice: query.has("notice")
     ? {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import type { Release } from "./changelog";
 
 export type Autoseed = {
   enabled: boolean;
@@ -50,13 +51,16 @@ export type State = {
   steam_id: string | null;
   game_installed: boolean;
   autostart: boolean;
-  update_ready: boolean;
   /** The update check made before anything else is shown. */
-  boot: {
-    status: "checking" | "required" | "clear";
-    version?: string;
-    notes?: string;
-  };
+  boot: { status: "checking" | "clear" };
+  /** A newer published version: optional unless critical, which locks the app until installed. */
+  update: {
+    version: string;
+    notes: string;
+    /** Every version this install is behind by, newest first. */
+    changes: Release[];
+    critical: "security" | "functionality" | null;
+  } | null;
   /** Whether the terms still need accepting for this version, and the seeding agreement. */
   consent: { needed: boolean; seeding: boolean };
   /** The notification waiting on the popup card, if any. */
@@ -114,6 +118,7 @@ export function useWarden() {
 
 export const REASONS: Record<string, string> = {
   ready: "Ready for a seed call",
+  update: "Update WARDEN to carry on",
   no_consent: "The seeding agreement has not been accepted",
   signed_out: "Sign in to switch on automatic seeding",
   no_steam: "Link your Steam account on tf21.net first",
