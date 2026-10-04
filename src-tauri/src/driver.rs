@@ -14,7 +14,8 @@ use windows::Storage::Streams::DataWriter;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-    GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+    GetDIBits, ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt, BITMAPINFO,
+    BITMAPINFOHEADER, DIB_RGB_COLORS, HALFTONE, SRCCOPY,
 };
 use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -31,6 +32,10 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(240);
 const JOIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// PW_CLIENTONLY | PW_RENDERFULLCONTENT: the game's own picture, even behind other windows.
 const PRINT_FLAGS: PRINT_WINDOW_FLAGS = PRINT_WINDOW_FLAGS(3);
+/// The OCR reads small print badly, and at 1080p and below the menus' small print is small
+/// indeed: JOIN BY ID came back as "JOIN BY IO", and the walk stopped at the server browser. The
+/// picture is enlarged to at least this many rows before it is read.
+const READING_HEIGHT: i32 = 2000;
 /// How long to leave a screen that is loading, unknown, or not in front before looking again.
 const LOOK_AGAIN: Duration = Duration::from_millis(1500);
 
@@ -80,6 +85,18 @@ pub fn find(lines: &[Vec<Word>], phrase: &str) -> Option<(f32, f32)> {
     None
 }
 
+/// Puts a word back where it is in the picture. When the OCR judges the text to be at a slant it
+/// straightens the picture first, turning it about its centre, and reports every position in the
+/// straightened picture. Over the game's moving 3D backdrop it sometimes sees a slant of a few
+/// degrees that is not there, which is enough to put a click on the button next door.
+pub fn upright(word: &mut Word, degrees: f32, width: f32, height: f32) {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let (cx, cy) = (width / 2.0, height / 2.0);
+    let (x, y) = (word.x + word.w / 2.0 - cx, word.y + word.h / 2.0 - cy);
+    word.x = cx + x * cos - y * sin - word.w / 2.0;
+    word.y = cy + x * sin + y * cos - word.h / 2.0;
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Screen {
     Title,
@@ -101,14 +118,6 @@ pub fn read(lines: &[Vec<Word>]) -> Screen {
     if at("SELECT FACTION").is_some() || at("LEAVE MATCH").is_some() {
         return Screen::InMatch;
     }
-    // The queue banner is small print, and OCR reads its Q as an O as often as not.
-    if lines
-        .iter()
-        .flatten()
-        .any(|w| tidy(&w.text).contains("UEUE"))
-    {
-        return Screen::Queued;
-    }
     if at("JOIN GAME SERVER").is_some() {
         if let Some((x, y)) = at("JOIN MATCH") {
             return Screen::Confirm(x, y);
@@ -128,12 +137,31 @@ pub fn read(lines: &[Vec<Word>]) -> Screen {
         }
     }
     if at("FIRING RANGE").is_some() {
-        if let Some((x, y)) = at("DEPLOY") {
+        // From a cold start the game runs its own checks first and says so above the Deploy
+        // button, which does nothing until they are over.
+        let checking = lines.iter().flatten().any(|w| {
+            let word = tidy(&w.text);
+            word.starts_with("INITIALIS") || word.starts_with("VERIFYING")
+        });
+        // DEPLOY is not always legible on the lit-up button under the pointer; the smaller
+        // SERVER BROWSER beneath it, on the same button, is.
+        if let (false, Some((x, y))) = (checking, at("DEPLOY").or_else(|| at("SERVER BROWSER"))) {
             return Screen::MainMenu(x, y);
         }
     }
     if at("PRESS ANY BUTTON").is_some() {
         return Screen::Title;
+    }
+    // The queue banner is small print, and OCR reads its Q as an O as often as not. It is looked
+    // for last: the server browser lists other people's server names, and one with "queue" in
+    // it must not pass for the banner. On the browser the walk knows it is queued by having
+    // pressed Join Match.
+    if lines
+        .iter()
+        .flatten()
+        .any(|w| tidy(&w.text).contains("UEUE"))
+    {
+        return Screen::Queued;
     }
     Screen::Unknown
 }
@@ -197,71 +225,123 @@ fn game() -> Option<Game> {
 }
 
 impl Game {
-    /// The window's picture as BGRA rows, top first.
-    fn capture(&self) -> Option<Vec<u8>> {
+    /// How many times over the picture is enlarged for reading: enough to reach the reading
+    /// height, short of the widest picture the OCR accepts.
+    fn zoom(&self) -> i32 {
+        let widest = OcrEngine::MaxImageDimension().unwrap_or(10000) as i32;
+        ((READING_HEIGHT + self.height - 1) / self.height)
+            .min(widest / self.width)
+            .max(1)
+    }
+
+    /// The window's picture, enlarged `zoom` times, as BGRA rows, top first.
+    fn capture(&self, zoom: i32) -> Option<Vec<u8>> {
+        let (width, height) = (self.width * zoom, self.height * zoom);
         unsafe {
             let screen = GetDC(None);
             let dc = CreateCompatibleDC(Some(screen));
             let bitmap = CreateCompatibleBitmap(screen, self.width, self.height);
             let before = SelectObject(dc, bitmap.into());
             let printed = PrintWindow(self.hwnd, dc, PRINT_FLAGS).as_bool();
+            let large_dc = CreateCompatibleDC(Some(screen));
+            let large = CreateCompatibleBitmap(screen, width, height);
+            let large_before = SelectObject(large_dc, large.into());
+            SetStretchBltMode(large_dc, HALFTONE);
+            let enlarged = StretchBlt(
+                large_dc,
+                0,
+                0,
+                width,
+                height,
+                Some(dc),
+                0,
+                0,
+                self.width,
+                self.height,
+                SRCCOPY,
+            )
+            .as_bool();
+            SelectObject(large_dc, large_before);
             let mut info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: self.width,
-                    biHeight: -self.height,
+                    biWidth: width,
+                    biHeight: -height,
                     biPlanes: 1,
                     biBitCount: 32,
                     ..Default::default()
                 },
                 ..Default::default()
             };
-            let mut pixels = vec![0u8; (self.width * self.height * 4) as usize];
+            let mut pixels = vec![0u8; (width * height * 4) as usize];
             let rows = GetDIBits(
-                dc,
-                bitmap,
+                large_dc,
+                large,
                 0,
-                self.height as u32,
+                height as u32,
                 Some(pixels.as_mut_ptr().cast()),
                 &mut info,
                 DIB_RGB_COLORS,
             );
             SelectObject(dc, before);
             let _ = DeleteObject(bitmap.into());
+            let _ = DeleteObject(large.into());
             let _ = DeleteDC(dc);
+            let _ = DeleteDC(large_dc);
             ReleaseDC(None, screen);
-            (printed && rows > 0).then_some(pixels)
+            (printed && enlarged && rows > 0).then_some(pixels)
         }
     }
 
+    /// The words on screen, line by line, each where it really is in the game's window.
     fn lines(&self, engine: &OcrEngine) -> windows::core::Result<Vec<Vec<Word>>> {
-        let Some(pixels) = self.capture() else {
-            return Ok(Vec::new());
+        Ok(self.recognise(engine)?.1)
+    }
+
+    /// The words on screen, and the slant in degrees the OCR judged them to be at. It reads an
+    /// enlarged picture and reports positions in a straightened one; both are undone here.
+    fn recognise(&self, engine: &OcrEngine) -> windows::core::Result<(f32, Vec<Vec<Word>>)> {
+        let zoom = self.zoom();
+        let Some(pixels) = self.capture(zoom) else {
+            return Ok((0.0, Vec::new()));
         };
+        let (width, height) = (self.width * zoom, self.height * zoom);
         let writer = DataWriter::new()?;
         writer.WriteBytes(&pixels)?;
         let bitmap = SoftwareBitmap::CreateCopyFromBuffer(
             &writer.DetachBuffer()?,
             BitmapPixelFormat::Bgra8,
-            self.width,
-            self.height,
+            width,
+            height,
         )?;
+        let result = engine.RecognizeAsync(&bitmap)?.join()?;
+        // No slant at all comes back as nothing rather than as zero.
+        let slant = result.TextAngle().and_then(|a| a.Value()).unwrap_or(0.0) as f32;
+        let scale = zoom as f32;
         let mut lines = Vec::new();
-        for line in engine.RecognizeAsync(&bitmap)?.join()?.Lines()? {
+        for line in result.Lines()? {
             let mut words = Vec::new();
             for word in line.Words()? {
                 let rect = word.BoundingRect()?;
-                words.push(Word {
+                let mut word = Word {
                     text: word.Text()?.to_string(),
                     x: rect.X,
                     y: rect.Y,
                     w: rect.Width,
                     h: rect.Height,
+                };
+                upright(&mut word, slant, width as f32, height as f32);
+                words.push(Word {
+                    x: word.x / scale,
+                    y: word.y / scale,
+                    w: word.w / scale,
+                    h: word.h / scale,
+                    ..word
                 });
             }
             lines.push(words);
         }
-        Ok(lines)
+        Ok((slant, lines))
     }
 
     /// Brings the game to the front and says whether it got there. Every click, key and paste
@@ -297,6 +377,12 @@ impl Game {
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             sleep(Duration::from_millis(80));
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+            // The game draws its own pointer, and a button under it lights up. Left where it
+            // clicked, it sits on the very words the next look has to read, so it is put away
+            // at the top edge of the window.
+            sleep(Duration::from_millis(150));
+            let _ = SetCursorPos(self.left + self.width / 2 - 5, self.top + 8);
+            mouse_event(MOUSEEVENTF_MOVE, 5, -5, 0, 0);
         }
         true
     }
@@ -492,6 +578,23 @@ mod tests {
             line(1190.0, &[("FIRING", 300.0), ("RANGE", 390.0)]),
         ];
         assert_eq!(read(&menu), Screen::MainMenu(470.0, 1060.0));
+        // With DEPLOY unread under the pointer, the line beneath it on the same button serves.
+        let lit = vec![
+            line(1090.0, &[("SERVER", 400.0), ("BROWSER", 490.0)]),
+            line(1190.0, &[("FIRING", 300.0), ("RANGE", 390.0)]),
+        ];
+        assert_eq!(read(&lit), Screen::MainMenu(485.0, 1100.0));
+        // While the game is still running its start-up checks the button is dead: wait.
+        let mut checking = menu.clone();
+        checking.push(line(
+            1000.0,
+            &[
+                ("WARDOGS", 60.0),
+                ("SECURITY", 150.0),
+                ("INITIALISING...", 240.0),
+            ],
+        ));
+        assert_eq!(read(&checking), Screen::Unknown);
         let deploy = vec![
             line(40.0, &[("DEPLOY", 300.0)]),
             line(1125.0, &[("OFFICIAL", 370.0), ("COMMUNITY", 930.0)]),
@@ -523,6 +626,7 @@ mod tests {
             &[("//", 1200.0), ("SELECT", 1240.0), ("FACTION", 1330.0)],
         )];
         assert_eq!(read(&faction), Screen::InMatch);
+        browser.truncate(3);
         browser.push(line(
             1053.0,
             &[
@@ -532,8 +636,33 @@ mod tests {
                 ("Position", 870.0),
             ],
         ));
-        assert_eq!(read(&browser), Screen::Queued);
+        // On the browser a "queue" may be a server's name: it stays the browser.
+        assert_eq!(read(&browser), Screen::Browser(270.0, 1365.0));
+        assert_eq!(read(&browser[browser.len() - 1..]), Screen::Queued);
         assert_eq!(read(&[]), Screen::Unknown);
+    }
+
+    /// Read off the main menu at 1920x1080 on a frame the OCR took to be slanted by 5.7 degrees:
+    /// it placed DEPLOY at 192,847, on the gap above FIRING RANGE, when it was at 163,775.
+    #[test]
+    fn a_word_read_at_a_slant_is_put_back_where_it_is_on_screen() {
+        let mut deploy = Word {
+            text: "DEPLOY".into(),
+            x: 192.0,
+            y: 847.0,
+            w: 121.0,
+            h: 32.0,
+        };
+        upright(&mut deploy, 5.68, 1920.0, 1080.0);
+        let (x, y) = find(&[vec![deploy.clone()]], "DEPLOY").unwrap();
+        assert!(
+            (x - 224.0).abs() < 3.0 && (y - 791.0).abs() < 3.0,
+            "{x},{y}"
+        );
+        // Read straight, a word stays put.
+        let before = deploy.clone();
+        upright(&mut deploy, 0.0, 1920.0, 1080.0);
+        assert_eq!(deploy, before);
     }
 
     #[test]
@@ -558,18 +687,52 @@ mod tests {
     }
 
     /// Run by hand with the game open: `cargo test --lib live_screen -- --ignored --nocapture`.
+    /// Prints what the OCR reads and which screen that makes it. `SHOT=file.bmp` also saves the
+    /// picture it read, and `ACT=1` makes the one click or key press the walk would make next.
     #[test]
     #[ignore]
     fn live_screen() {
         let g = game().expect("the game window");
-        let lines = g.lines(&engine().expect("an OCR engine")).unwrap();
+        let (slant, lines) = g.recognise(&engine().expect("an OCR engine")).unwrap();
+        println!("slant {slant}, read at {} times the size", g.zoom());
         for words in &lines {
             let row: Vec<_> = words
                 .iter()
-                .map(|w| format!("{}@{:.0},{:.0}", w.text, w.x, w.y))
+                .map(|w| format!("{}@{:.0},{:.0}+{:.0}x{:.0}", w.text, w.x, w.y, w.w, w.h))
                 .collect();
             println!("{}", row.join("  "));
         }
-        println!("{}x{} -> {:?}", g.width, g.height, read(&lines));
+        let screen = read(&lines);
+        println!(
+            "{}x{} at {},{} -> {:?}",
+            g.width, g.height, g.left, g.top, screen
+        );
+        if let Ok(path) = std::env::var("SHOT") {
+            let pixels = g.capture(1).expect("a picture of the game");
+            let mut bmp = Vec::with_capacity(54 + pixels.len());
+            bmp.extend(b"BM");
+            bmp.extend((54 + pixels.len() as u32).to_le_bytes());
+            bmp.extend([0u8; 4]);
+            bmp.extend(54u32.to_le_bytes());
+            bmp.extend(40u32.to_le_bytes());
+            bmp.extend(g.width.to_le_bytes());
+            bmp.extend((-g.height).to_le_bytes());
+            bmp.extend(1u16.to_le_bytes());
+            bmp.extend(32u16.to_le_bytes());
+            bmp.extend([0u8; 24]);
+            bmp.extend(pixels);
+            std::fs::write(path, bmp).unwrap();
+        }
+        if std::env::var("ACT").is_ok() {
+            let sent = match screen {
+                Screen::Title => g.key(&[VK_SPACE.0 as u8]),
+                Screen::MainMenu(x, y)
+                | Screen::Deploy(x, y)
+                | Screen::Browser(x, y)
+                | Screen::Confirm(x, y) => g.click(x, y),
+                _ => false,
+            };
+            println!("sent: {sent}");
+        }
     }
 }

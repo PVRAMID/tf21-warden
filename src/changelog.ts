@@ -15,6 +15,18 @@ export type Release = {
 
 export const CHANGELOG: Release[] = [
   {
+    version: "1.2.4",
+    date: "2026-10-04",
+    author: "PVRAMID",
+    title: "Automatic joins that find the right button",
+    changes: [
+      "Fixed automatic joins clicking Firing Range, or the gap beside a button, instead of Deploy. Windows' text reader sometimes judged the game's menu to be at a slight slant and reported every position a little off. WARDEN now corrects for that.",
+      "Fixed automatic joins stopping at the server browser at 1080p and below, where the menu's small print was misread. The picture is now enlarged before it is read.",
+      "WARDEN waits for the game's own start-up checks to finish before pressing Deploy, and moves the pointer out of the way after each click so it never covers the words it has to read next.",
+      "Checked from a cold start at 1024x768, 1280x720, 1280x1024, 1366x768, 1600x900, 1680x1050, 1920x1080, 1920x1200 and 2560x1440, and in a 21:9 window.",
+    ],
+  },
+  {
     version: "1.2.3",
     date: "2026-10-04",
     author: "PVRAMID",
