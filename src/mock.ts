@@ -167,6 +167,24 @@ const FIXTURES: Record<string, unknown> = {
   "/api/app/record": {
     signed_in: true,
     steam_linked: true,
+    combat: {
+      kills: 1840,
+      deaths: 1105,
+      kd: 1.67,
+      headshot_rate: 0.214,
+      penetrations: 96,
+      melee: 7,
+      roadkills: 3,
+      vehicle_kills: 41,
+      team_kills: 5,
+      avg_m: 62,
+      longest_m: 688,
+      weapons: [
+        { weapon: "SVD", kills: 402, headshot_rate: 0.38, longest_m: 688 },
+        { weapon: "Galil", kills: 311, headshot_rate: 0.17, longest_m: 214 },
+      ],
+      server: { headshot_rate: 0.165, avg_m: 48 },
+    },
     servers: [
       {
         slug: "uk1",

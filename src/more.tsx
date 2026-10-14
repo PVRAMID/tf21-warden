@@ -13,9 +13,30 @@ type Totals = {
   play_seconds: number;
   last_seen: string | null;
 } | null;
+type Combat = {
+  kills: number;
+  deaths: number;
+  kd: number;
+  headshot_rate: number | null;
+  penetrations: number;
+  melee: number;
+  roadkills: number;
+  vehicle_kills: number;
+  team_kills: number;
+  avg_m: number | null;
+  longest_m: number | null;
+  weapons: {
+    weapon: string;
+    kills: number;
+    headshot_rate: number | null;
+    longest_m: number | null;
+  }[];
+  server: { headshot_rate: number | null; avg_m: number | null };
+};
 type RecordData = {
   signed_in: boolean;
   steam_linked?: boolean;
+  combat?: Combat | null;
   servers?: {
     slug: string;
     name: string;
@@ -79,6 +100,8 @@ const hours = (seconds: number) =>
     ? `${(seconds / 3600).toFixed(seconds >= 36000 ? 0 : 1)} h`
     : `${Math.round(seconds / 60)} min`;
 const number = (n: number | undefined) => (n ?? 0).toLocaleString("en-GB");
+const pct = (r: number | null) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
+const metres = (m: number | null) => (m == null ? "—" : `${number(m)} m`);
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", {
     day: "numeric",
@@ -102,6 +125,57 @@ function Figures({ items }: { items: [string, string][] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** All time, every server, from the kill feed. */
+function CombatPanel({ c }: { c: Combat }) {
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>Combat record</h2>
+          <p className="small">All time, every TF21 server</p>
+        </div>
+      </div>
+      <Figures
+        items={[
+          ["K/D", c.kd.toFixed(2)],
+          ["Kills", number(c.kills)],
+          ["Headshot ratio", pct(c.headshot_rate)],
+          ["Longest kill", metres(c.longest_m)],
+          ["Average distance", metres(c.avg_m)],
+        ]}
+      />
+      <p className="small">
+        Server average: {pct(c.server.headshot_rate)} headshots,{" "}
+        {metres(c.server.avg_m)} per kill. Through cover {number(c.penetrations)}
+        , melee {number(c.melee)}, roadkills {number(c.roadkills)}, vehicle
+        kills {number(c.vehicle_kills)}, team kills {number(c.team_kills)}.
+      </p>
+      {c.weapons.length > 0 && (
+        <table className="table" aria-label="Top weapons">
+          <thead>
+            <tr>
+              <th>Weapon</th>
+              <th>Kills</th>
+              <th>Headshots</th>
+              <th>Longest</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.weapons.map((w) => (
+              <tr key={w.weapon}>
+                <td>{w.weapon}</td>
+                <td>{number(w.kills)}</td>
+                <td>{pct(w.headshot_rate)}</td>
+                <td>{metres(w.longest_m)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
@@ -182,6 +256,7 @@ export function Record({ state, go }: { state: State; go: Go }) {
               )}
             </div>
           </div>
+          {data.combat && <CombatPanel c={data.combat} />}
           {data.servers?.map((s) => (
             <div className="panel" key={s.slug}>
               <div className="panel-head">

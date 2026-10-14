@@ -15,6 +15,17 @@ export type Release = {
 
 export const CHANGELOG: Release[] = [
   {
+    version: "1.5.0",
+    date: "2026-10-14",
+    author: "PVRAMID",
+    title: "Your combat record",
+    changes: [
+      "My record now opens with your combat record: K/D, headshot ratio, longest and average kill distance, all time across every TF21 server, with the server average beside them.",
+      "It also shows how your kills happened (through cover, melee, roadkills, vehicle kills) and your top weapons with their headshot ratio and longest kill.",
+      "The same record, in more detail, is on the new Combat tab in Member HQ on tf21.net.",
+    ],
+  },
+  {
     version: "1.4.0",
     date: "2026-10-04",
     author: "PVRAMID",

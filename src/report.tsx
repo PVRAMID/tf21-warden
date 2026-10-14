@@ -803,7 +803,7 @@ function Wizard({
                   )}
                   {draft.suspects.length > 1 && (
                     <span className="small">
-                      Each player gets their own report.
+                      One report; staff decide each player on their own.
                     </span>
                   )}
                 </dd>
